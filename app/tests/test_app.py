@@ -293,8 +293,8 @@ def test_plan_mutation_returns_before_slow_todoist_write(tmp_path):
         board = client.get("/").text
         tasks = [task for cells in boot_data(board)["grid"].values() for items in cells.values() for task in items]
         assert any(task["operation_id"] == response.json()["operation_id"] for task in tasks)
-        assert "/static/planner.bundle.js?v=16" in board
-        assert "/static/app.css?v=31" in board
+        assert "/static/planner.bundle.js?v=17" in board
+        assert "/static/app.css?v=32" in board
         assert wait_for_operation(client, response.json()["operation_id"])["state"] == "done"
 
 
@@ -344,6 +344,8 @@ def test_settings_slot_rows_keep_labels_screenreader_only_at_all_widths():
     assert ".slot-edit-row{grid-template-columns:28px minmax(0,1fr) 170px 38px}" in css
     assert ".slot-order-step{display:none;" in css
     assert "body.keyboard-navigation .slot-edit-row,.slot-edit-row.reorder-actions-open{grid-template-columns:52px" in css
+    assert ".slot-edit-row:hover .slot-order-step" not in css
+    assert "@media(max-width:560px) and (hover:hover){.slot-edit-row:hover" not in css
     assert "distanceThreshold: event.pointerType === \"touch\" || event.pointerType === \"pen\" ? 10 : 5" in frontend
     assert "pointerStartRef.current = { x: event.clientX, y: event.clientY" in frontend
     assert "slot-edit-grip" in frontend and "slot-order-step" in frontend and "onPointerDown" in frontend
