@@ -3,14 +3,19 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "postinstall": "patch-package",
     "build": "esbuild src/main.jsx --bundle --minify --target=es2020 --outfile=../static/planner.bundle.js"
   },
   "dependencies": {
+    "@dnd-kit/core": "6.3.1",
+    "@dnd-kit/sortable": "10.0.0",
+    "@dnd-kit/utilities": "3.2.2",
     "motion": "13.4.4",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
   "devDependencies": {
-    "esbuild": "0.28.2"
+    "esbuild": "0.28.2",
+    "patch-package": "8.0.1"
   }
 }

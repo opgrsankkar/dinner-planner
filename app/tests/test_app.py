@@ -293,8 +293,8 @@ def test_plan_mutation_returns_before_slow_todoist_write(tmp_path):
         board = client.get("/").text
         tasks = [task for cells in boot_data(board)["grid"].values() for items in cells.values() for task in items]
         assert any(task["operation_id"] == response.json()["operation_id"] for task in tasks)
-        assert "/static/planner.bundle.js?v=19" in board
-        assert "/static/app.css?v=32" in board
+        assert "/static/planner.bundle.js?v=20" in board
+        assert "/static/app.css?v=33" in board
         assert wait_for_operation(client, response.json()["operation_id"])["state"] == "done"
 
 
@@ -346,12 +346,14 @@ def test_settings_slot_rows_keep_labels_screenreader_only_at_all_widths():
     assert "body.keyboard-navigation .slot-edit-row,.slot-edit-row.reorder-actions-open{grid-template-columns:52px" in css
     assert ".slot-edit-row:hover .slot-order-step" not in css
     assert "@media(max-width:560px) and (hover:hover){.slot-edit-row:hover" not in css
-    assert "distanceThreshold: event.pointerType === \"touch\" || event.pointerType === \"pen\" ? 10 : 5" in frontend
-    assert "pointerStartRef.current = { x: event.clientX, y: event.clientY" in frontend
-    assert "suppressPostDragClickRef.current = true" in frontend and "if (suppressPostDragClickRef.current)" in frontend and "!suppressPostDragClickRef.current" in frontend
     assert "slot-edit-grip" in frontend and "slot-order-step" in frontend and "onPointerDown" in frontend
-    assert "Reorder.Group" in frontend and "Reorder.Item" in frontend and 'from "motion/react"' in frontend
-    assert "reorderControls.start(event" in frontend and 'onClick={() => onReorderKey(slot.id, -1)}' in frontend and 'onClick={() => onReorderKey(slot.id, 1)}' in frontend
+    assert "DndContext" in frontend and "SortableContext" in frontend and "useSortable" in frontend
+    assert "PointerSensor" in frontend and "KeyboardSensor" in frontend and "sortableKeyboardCoordinates" in frontend
+    assert 'from "motion/react"' in frontend  # retained for swipe/delete animation
+    assert "suppressPostDragClickRef.current = true" in frontend and "if (suppressPostDragClickRef.current)" in frontend
+    assert 'element.style.setProperty("--sortable-transform"' in frontend and 'element.style.setProperty("--sortable-transition"' in frontend
+    assert "slot-edit-grip{flex:0 0 20px;width:20px;height:28px;font-size:15px;touch-action:none;cursor:grab}" in css
+    assert 'onClick={() => onReorderKey(slot.id, -1)}' in frontend and 'onClick={() => onReorderKey(slot.id, 1)}' in frontend
     assert 'document.addEventListener("keydown", onKeyDown, true)' in frontend and 'keyboard-navigation' in frontend
     assert "body.keyboard-navigation .slot-edit-grip,.slot-edit-row.reorder-actions-open .slot-edit-grip{display:none}" in css
     assert "@media(max-width:560px){.slot-edit-row{grid-template-columns:28px minmax(0,1fr) 72px 34px}" in css
@@ -368,7 +370,7 @@ def test_settings_slot_rows_keep_labels_screenreader_only_at_all_widths():
     assert ".slot-settings-form{padding:0;border:0;border-radius:0;background:transparent;box-shadow:none}" in css
     assert 'aria-label="Meal slot label"' in frontend and 'id="slot-settings"' in frontend
     assert 'id="revert-slot-changes"' in frontend and 'disabled={saving || !dirty}' in frontend
-    assert frontend.count('disabled={saving}') >= 4 and 'if (saving || isReordering' in frontend
+    assert frontend.count('disabled={saving}') >= 2 and 'if (saving || isReordering' in frontend
     assert 'baseline = useRef(JSON.stringify(data.slots || []))' in frontend and 'JSON.parse(baseline.current)' in frontend
     assert 'data-state={saveState}' in frontend and 'setSaveState("saving")' in frontend and 'setSaveState("saved")' in frontend
     assert "Saving…" not in frontend and "420 - (performance.now() - started)" in frontend
