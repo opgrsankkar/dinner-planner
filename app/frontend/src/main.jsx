@@ -523,6 +523,7 @@ const SlotSettingsRow = forwardRef(function SlotSettingsRow({ slot, saving, drag
   const reduceMotion = useReducedMotion();
   const [reorderActionsOpen, setReorderActionsOpen] = useState(false);
   const pointerStartRef = useRef(null);
+  const suppressPostDragClickRef = useRef(false);
   useEffect(() => {
     if (!reorderActionsOpen) return;
     const closeOnOutsidePointer = (event) => {
@@ -538,7 +539,7 @@ const SlotSettingsRow = forwardRef(function SlotSettingsRow({ slot, saving, drag
     swipeControls.start(event, { distanceThreshold: 10 });
   };
   return <Reorder.Item ref={ref} as="div" className="slot-row-shell" data-slot-id={slot.id} value={slot} dragListener={false} dragControls={reorderControls}
-    onDragStart={() => { setReorderActionsOpen(false); onReorderStart(slot.id); }} onDragEnd={() => onReorderEnd(slot.id)}
+    onDragStart={() => { suppressPostDragClickRef.current = true; setReorderActionsOpen(false); onReorderStart(slot.id); }} onDragEnd={() => onReorderEnd(slot.id)}
     whileDrag={{ zIndex: 5 }}
     transition={reduceMotion ? { layout: { duration: 0 } } : { layout: { type: "spring", stiffness: 700, damping: 50 } }}
     layout exit={{ x: "-110%", opacity: 0, height: 0, transition: { duration: reduceMotion ? 0 : 0.32, ease: [0.2, 0.72, 0.25, 1] } }}>
@@ -549,9 +550,9 @@ const SlotSettingsRow = forwardRef(function SlotSettingsRow({ slot, saving, drag
       <div className="slot-order-controls" role="group" aria-label={`Reorder ${slot.name}`} onBlur={(event) => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setReorderActionsOpen(false); }}>
         <button type="button" className="slot-order-step" aria-label={`Move ${slot.name} up`} title={`Move ${slot.name} up`} disabled={saving || position === 0} onClick={() => onReorderKey(slot.id, -1)}>↑</button>
         <motion.button type="button" className="slot-edit-grip" aria-label={`Drag to reorder ${slot.name}; tap to show move buttons`} title="Drag to reorder; tap to show move buttons" disabled={saving}
-          onPointerDown={(event) => { event.stopPropagation(); if (saving || (event.button !== undefined && event.button !== 0)) return; pointerStartRef.current = { x: event.clientX, y: event.clientY, pointerType: event.pointerType }; reorderControls.start(event, { distanceThreshold: event.pointerType === "touch" || event.pointerType === "pen" ? 10 : 5 }); }}
-          onPointerUp={(event) => { const start = pointerStartRef.current; pointerStartRef.current = null; const threshold = start?.pointerType === "touch" || start?.pointerType === "pen" ? 10 : 5; if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) < threshold) setReorderActionsOpen(true); }}
-          onPointerCancel={() => { pointerStartRef.current = null; }} onClick={(event) => { event.stopPropagation(); setReorderActionsOpen(true); }}>⠿</motion.button>
+          onPointerDown={(event) => { event.stopPropagation(); if (saving || (event.button !== undefined && event.button !== 0)) return; suppressPostDragClickRef.current = false; pointerStartRef.current = { x: event.clientX, y: event.clientY, pointerType: event.pointerType }; reorderControls.start(event, { distanceThreshold: event.pointerType === "touch" || event.pointerType === "pen" ? 10 : 5 }); }}
+          onPointerUp={(event) => { const start = pointerStartRef.current; pointerStartRef.current = null; const threshold = start?.pointerType === "touch" || start?.pointerType === "pen" ? 10 : 5; if (start && !suppressPostDragClickRef.current && Math.hypot(event.clientX - start.x, event.clientY - start.y) < threshold) setReorderActionsOpen(true); }}
+          onPointerCancel={() => { pointerStartRef.current = null; }} onClick={(event) => { event.stopPropagation(); if (suppressPostDragClickRef.current) { suppressPostDragClickRef.current = false; return; } setReorderActionsOpen(true); }}>⠿</motion.button>
         <button type="button" className="slot-order-step" aria-label={`Move ${slot.name} down`} title={`Move ${slot.name} down`} disabled={saving || position >= total - 1} onClick={() => onReorderKey(slot.id, 1)}>↓</button>
       </div>
       <label><span className="visually-hidden">Meal slot label</span><input className="slot-name" name="meal_slot_label" aria-label="Meal slot label" autoComplete="off" autoCapitalize="words" autoCorrect="off" spellCheck="false" maxLength={32} required disabled={saving} value={slot.name} onChange={(event) => onNameChange(slot.id, event.target.value)} /></label>

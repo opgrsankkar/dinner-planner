@@ -293,7 +293,7 @@ def test_plan_mutation_returns_before_slow_todoist_write(tmp_path):
         board = client.get("/").text
         tasks = [task for cells in boot_data(board)["grid"].values() for items in cells.values() for task in items]
         assert any(task["operation_id"] == response.json()["operation_id"] for task in tasks)
-        assert "/static/planner.bundle.js?v=17" in board
+        assert "/static/planner.bundle.js?v=19" in board
         assert "/static/app.css?v=32" in board
         assert wait_for_operation(client, response.json()["operation_id"])["state"] == "done"
 
@@ -348,6 +348,7 @@ def test_settings_slot_rows_keep_labels_screenreader_only_at_all_widths():
     assert "@media(max-width:560px) and (hover:hover){.slot-edit-row:hover" not in css
     assert "distanceThreshold: event.pointerType === \"touch\" || event.pointerType === \"pen\" ? 10 : 5" in frontend
     assert "pointerStartRef.current = { x: event.clientX, y: event.clientY" in frontend
+    assert "suppressPostDragClickRef.current = true" in frontend and "if (suppressPostDragClickRef.current)" in frontend and "!suppressPostDragClickRef.current" in frontend
     assert "slot-edit-grip" in frontend and "slot-order-step" in frontend and "onPointerDown" in frontend
     assert "Reorder.Group" in frontend and "Reorder.Item" in frontend and 'from "motion/react"' in frontend
     assert "reorderControls.start(event" in frontend and 'onClick={() => onReorderKey(slot.id, -1)}' in frontend and 'onClick={() => onReorderKey(slot.id, 1)}' in frontend
