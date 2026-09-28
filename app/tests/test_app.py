@@ -293,8 +293,8 @@ def test_plan_mutation_returns_before_slow_todoist_write(tmp_path):
         board = client.get("/").text
         tasks = [task for cells in boot_data(board)["grid"].values() for items in cells.values() for task in items]
         assert any(task["operation_id"] == response.json()["operation_id"] for task in tasks)
-        assert "/static/planner.bundle.js?v=15" in board
-        assert "/static/app.css?v=30" in board
+        assert "/static/planner.bundle.js?v=16" in board
+        assert "/static/app.css?v=31" in board
         assert wait_for_operation(client, response.json()["operation_id"])["state"] == "done"
 
 
@@ -334,9 +334,13 @@ def test_lucide_assets_and_react_sync_indicator_are_served(tmp_path):
         assert "window.location.reload" not in frontend
 
 
-def test_mobile_settings_rows_use_one_compact_line_without_visible_labels():
+def test_settings_slot_rows_keep_labels_screenreader_only_at_all_widths():
     css = (Path(__file__).parents[1] / "static" / "app.css").read_text()
     frontend = (Path(__file__).parents[1] / "frontend" / "src" / "main.jsx").read_text()
+    assert '.visually-hidden{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}' in css
+    assert '<span className="visually-hidden">Meal slot label</span>' in frontend
+    assert '<span className="visually-hidden">Preset time</span>' in frontend
+    assert ".slot-edit-row label>span{" not in css
     assert ".slot-edit-row{grid-template-columns:28px minmax(0,1fr) 170px 38px}" in css
     assert ".slot-order-step{display:none;" in css
     assert "body.keyboard-navigation .slot-edit-row,.slot-edit-row.reorder-actions-open{grid-template-columns:52px" in css

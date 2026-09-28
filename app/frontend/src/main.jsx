@@ -554,8 +554,8 @@ const SlotSettingsRow = forwardRef(function SlotSettingsRow({ slot, saving, drag
           onPointerCancel={() => { pointerStartRef.current = null; }}>⠿</motion.button>
         <button type="button" className="slot-order-step" aria-label={`Move ${slot.name} down`} title={`Move ${slot.name} down`} disabled={saving || position >= total - 1} onClick={() => onReorderKey(slot.id, 1)}>↓</button>
       </div>
-      <label><span>Meal slot label</span><input className="slot-name" name="meal_slot_label" aria-label="Meal slot label" autoComplete="off" autoCapitalize="words" autoCorrect="off" spellCheck="false" maxLength={32} required disabled={saving} value={slot.name} onChange={(event) => onNameChange(slot.id, event.target.value)} /></label>
-      <label><span>Preset time</span><input className="slot-time" aria-label="Preset time" type="time" required disabled={saving} value={slot.time} onChange={(event) => onTimeChange(slot.id, event.target.value)} /></label>
+      <label><span className="visually-hidden">Meal slot label</span><input className="slot-name" name="meal_slot_label" aria-label="Meal slot label" autoComplete="off" autoCapitalize="words" autoCorrect="off" spellCheck="false" maxLength={32} required disabled={saving} value={slot.name} onChange={(event) => onNameChange(slot.id, event.target.value)} /></label>
+      <label><span className="visually-hidden">Preset time</span><input className="slot-time" aria-label="Preset time" type="time" required disabled={saving} value={slot.time} onChange={(event) => onTimeChange(slot.id, event.target.value)} /></label>
       <button type="button" className="remove-slot" aria-label={`Remove ${slot.name}`} title="Remove meal slot" disabled={saving} onPointerDown={(event) => event.stopPropagation()} onClick={() => onRemove(slot.id)}><svg className="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 6h18M8 6V4h8v2m2 0-1 14H7L6 6m4 5v6m4-6v6" /></svg></button>
     </motion.div>
   </Reorder.Item>;
