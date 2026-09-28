@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en" data-theme-mode="{{ theme_mode }}"{% if theme_mode != 'system' %} data-theme="{{ theme_mode }}"{% endif %}>
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark">
+  <meta name="theme-color" id="theme-color-light" content="#f7f7f4" media="(prefers-color-scheme: light)"><meta name="theme-color" id="theme-color-dark" content="#111a16" media="(prefers-color-scheme: dark)">
+  <title>Sign in · Meal Planner</title><link rel="stylesheet" href="/static/app.css?v=30">
+</head>
+<body class="login-page" data-theme-mode="{{ theme_mode }}">
+  <main class="login-card">
+    <div class="login-mark" aria-hidden="true">✦</div><h1>Meal Planner</h1>
+    {% if error %}<div class="error-banner" role="alert">{{ error }}</div>{% endif %}
+    <form method="post" action="/login" class="login-form">
+      <input type="hidden" name="next" value="{{ next }}">
+      <label for="password">Password</label><input id="password" name="password" type="password" required autocomplete="current-password" autofocus>
+      <button class="primary-button" type="submit">Sign in</button>
+    </form>
+  </main>
+</body>
+</html>

@@ -1,0 +1,35 @@
+services:
+  dinner-planner:
+    build: .
+    container_name: dinner-planner
+    restart: unless-stopped
+    user: "${APP_UID:-10001}:${APP_GID:-10001}"
+    env_file: .env
+    environment:
+      APP_PASSWORD: ${APP_PASSWORD:?Set APP_PASSWORD in .env}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
+      TODOIST_TOKEN: ${TODOIST_TOKEN:-}
+      TODOIST_TOKEN_FILE: /run/secrets/todoist-token
+      TODOIST_PROJECT: Meals
+      DATABASE_PATH: ${DATABASE_PATH:-/data/meals.sqlite3}
+      TZ: Asia/Kolkata
+      COOKIE_SECURE: "true"
+      ALLOWED_HOSTS: meals.happydaysblr.ddns.net,localhost,127.0.0.1
+    ports:
+      - "172.17.0.1:8789:8789"
+    volumes:
+      - ./data:/data
+      - ${TODOIST_TOKEN_FILE:-./secrets/todoist-token}:/run/secrets/todoist-token:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8789/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s

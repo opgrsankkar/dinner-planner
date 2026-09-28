@@ -1,0 +1,7 @@
+.git
+.env
+data/
+secrets/
+.pytest_cache/
+**/__pycache__/
+app/frontend/node_modules/

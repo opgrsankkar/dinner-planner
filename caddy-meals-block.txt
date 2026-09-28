@@ -1,0 +1,14 @@
+
+meals.happydaysblr.ddns.net {
+	reverse_proxy 172.17.0.1:8789
+
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+	}
+}
