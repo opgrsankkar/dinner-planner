@@ -22,7 +22,17 @@ npm run typecheck
 npm run build
 ```
 
-`npm test` runs the fresh-database Prisma smoke and the deterministic legacy compatibility harness. The migration harness extracts the exact `SCHEMA` literal from `app/db.py` with Python's AST, creates a legacy source fixture and a separate SQLite backup copy under a newly created OS temporary directory, and applies the checked-in Prisma migrations to another temporary target. It imports only from the temporary copy, opened read-only, into the empty target.
+## TypeScript authentication/security foundation
+
+The TypeScript server requires `APP_PASSWORD` and a `SESSION_SECRET` with at least 32 characters. `ALLOWED_HOSTS` is a comma-separated list of hostnames (optionally with ports); it defaults to the Python app's current host list and rejects empty or malformed entries. Secure cookies are enabled by default. Setting `COOKIE_SECURE=false` is intended only for isolated local tests over HTTP.
+
+The `/login` page is server-rendered and accessible. Successful sign-in sets a signed, 30-day `HttpOnly; SameSite=Lax` cookie, with `Secure` and the `__Host-` prefix when secure cookies are enabled. Protected pages redirect unauthenticated requests to login; `/api` and TanStack server-function requests return JSON 401 responses. Logout and non-read requests require same-origin request metadata; logout also verifies the session CSRF token. Response security headers apply to app pages and APIs, which use `Cache-Control: no-store`. `/healthz` is public and returns a static status without a Todoist client call.
+
+Login throttling allows five failed attempts per client IP in a rolling five-minute window. In the Fetch request model, the resolver reads `CF-Connecting-IP`, then the first `X-Forwarded-For` address, then `X-Real-IP`; a reverse proxy must replace or sanitize these headers before forwarding requests. Authentication tests use explicit in-memory test configuration and temporary files where needed. They do not load deployment secrets or databases.
+
+This milestone adds only the authentication and security foundation under `src/security`, `/login`, `/logout`, and the small authenticated landing page. It does not add planner/settings routes, Todoist calls, or an outbox, and it does not modify the Python/React runtime or deployment configuration.
+
+`npm test` runs the authentication unit tests, built-server HTTP integration tests, fresh-database Prisma smoke, and deterministic legacy compatibility harness. The migration harness extracts the exact `SCHEMA` literal from `app/db.py` with Python's AST, creates a legacy source fixture and a separate SQLite backup copy under a newly created OS temporary directory, and applies the checked-in Prisma migrations to another temporary target. It imports only from the temporary copy, opened read-only, into the empty target.
 
 The harness proves on representative synthetic rows that:
 
@@ -50,12 +60,16 @@ Production migration remains gated on a verified backup of the exact production 
 
 1. **Foundation:** isolated TanStack Start `/healthz`, strict TypeScript, Node 26, and a fresh temporary SQLite smoke test.
 2. **Operational-state migration proof:** model legacy operational data and test a synthetic copy migration with explicit blockers and production backup/rollback gates. This phase does not qualify production data.
-3. **Production runtime cutover:** a separate future phase after the contract gap, production-data audit, backup, restore, and operational-readiness gates are resolved. Todoist remains authoritative for planned meals.
+3. **TypeScript authentication/security:** port the existing password, signed-session, host validation, CSRF, rate-limit, and response-header foundation into the isolated TypeScript app.
+4. **Production runtime cutover:** a separate future phase after the contract gap, production-data audit, backup, restore, and operational-readiness gates are resolved. Todoist remains authoritative for planned meals.
 
 ## Official setup references
 
 - [TanStack Start build from scratch](https://tanstack.com/start/latest/docs/framework/react/build-from-scratch)
 - [TanStack Start server routes](https://tanstack.com/start/latest/docs/framework/react/guide/server-routes)
+- [TanStack Start server entry point](https://tanstack.com/start/latest/docs/framework/react/guide/server-entry-point)
+- [TanStack Start middleware and CSRF protection](https://tanstack.com/start/latest/docs/framework/react/guide/middleware)
+- [TanStack Start authentication](https://tanstack.com/start/latest/docs/framework/react/guide/authentication)
 - [Prisma supported databases](https://www.prisma.io/docs/orm/supported-databases)
 - [Prisma SQLite extension](https://www.prisma.io/extensions/sqlite)
 - [Node.js 26 downloads](https://nodejs.org/dist/v26.9.0/)
