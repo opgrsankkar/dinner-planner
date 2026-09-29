@@ -348,12 +348,16 @@ def test_settings_slot_rows_keep_labels_screenreader_only_at_all_widths():
     assert "@media(max-width:560px) and (hover:hover){.slot-edit-row:hover" not in css
     assert "slot-edit-grip" in frontend and "slot-order-step" in frontend and "onPointerDown" in frontend
     assert "DndContext" in frontend and "SortableContext" in frontend and "useSortable" in frontend
-    assert "PointerSensor" in frontend and "KeyboardSensor" in frontend and "sortableKeyboardCoordinates" in frontend
+    assert "PointerSensor" in frontend and "KeyboardSensor" not in frontend and "sortableKeyboardCoordinates" not in frontend
     assert 'from "motion/react"' in frontend  # retained for swipe/delete animation
     assert "suppressPostDragClickRef.current = true" in frontend and "if (suppressPostDragClickRef.current)" in frontend
     assert 'element.style.setProperty("--sortable-transform"' in frontend and 'element.style.setProperty("--sortable-transition"' in frontend
     assert "slot-edit-grip{flex:0 0 20px;width:20px;height:28px;font-size:15px;touch-action:none;cursor:grab}" in css
     assert 'onClick={() => onReorderKey(slot.id, -1)}' in frontend and 'onClick={() => onReorderKey(slot.id, 1)}' in frontend
+    assert "setSlots(arrayMove(slots, oldIndex, newIndex))" in frontend and "onDragOver={handleSlotDragOver}" not in frontend
+    assert "draggingId" not in frontend and "reorderStartStateRef" not in frontend
+    assert '"@dnd-kit/accessibility": "3.1.1"' in (Path(__file__).parents[1] / "frontend" / "package.json").read_text()
+    assert "Use the Move Up and Move Down buttons to reorder this slot with a keyboard." in frontend
     assert 'document.addEventListener("keydown", onKeyDown, true)' in frontend and 'keyboard-navigation' in frontend
     assert "body.keyboard-navigation .slot-edit-grip,.slot-edit-row.reorder-actions-open .slot-edit-grip{display:none}" in css
     assert "@media(max-width:560px){.slot-edit-row{grid-template-columns:28px minmax(0,1fr) 72px 34px}" in css

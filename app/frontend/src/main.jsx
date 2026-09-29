@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AnimatePresence, motion, useDragControls, useReducedMotion } from "motion/react";
-import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
-import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
 const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -520,7 +520,7 @@ function PlannerBoard({ data, csrf, theme, notify }) {
   </>;
 }
 
-function SlotSettingsRow({ slot, saving, disabled, dragging, position, total, onRemove, onReorderKey, onNameChange, onTimeChange }) {
+function SlotSettingsRow({ slot, saving, disabled, position, total, onRemove, onReorderKey, onNameChange, onTimeChange }) {
   const swipeControls = useDragControls();
   const reduceMotion = useReducedMotion();
   const [reorderActionsOpen, setReorderActionsOpen] = useState(false);
@@ -537,11 +537,11 @@ function SlotSettingsRow({ slot, saving, disabled, dragging, position, total, on
     else element.style.removeProperty("--sortable-transition");
   }, [node, transform, transition]);
   useEffect(() => {
-    if (dragging) {
+    if (isDragging) {
       suppressPostDragClickRef.current = true;
       setReorderActionsOpen(false);
     }
-  }, [dragging]);
+  }, [isDragging]);
   useEffect(() => {
     if (!reorderActionsOpen) return;
     const closeOnOutsidePointer = (event) => {
@@ -597,21 +597,15 @@ function SettingsPage({ data, csrf, theme, notify }) {
   const [savedTimer, setSavedTimer] = useState(null);
   const [removingSlots, setRemovingSlots] = useState(new Set());
   const [removingMeals, setRemovingMeals] = useState(new Set());
-  const [draggingId, setDraggingId] = useState("");
   const [isReordering, setIsReordering] = useState(false);
   const [announcement, setAnnouncement] = useState("");
-  const reorderStartOrderRef = useRef([]);
-  const reorderStartStateRef = useRef("");
   const removingSlotsRef = useRef(new Set());
   const baseline = useRef(JSON.stringify(data.slots || []));
   const valid = slots.length > 0 && slots.length <= 12 && slots.every((slot) => slot.name.trim() && /^([01]\d|2[0-3]):[0-5]\d$/.test(slot.time)) && new Set(slots.map((slot) => slot.time)).size === slots.length;
-  const dirty = (isReordering ? reorderStartStateRef.current !== baseline.current : JSON.stringify(slots) !== baseline.current) || removingSlots.size > 0;
+  const dirty = JSON.stringify(slots) !== baseline.current || removingSlots.size > 0;
   const visibleSlots = slots.filter((slot) => !removingSlots.has(slot.id));
   const filteredLibrary = library.filter((meal) => meal.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const announceSlotDrag = (id) => slots.find((slot) => String(slot.id) === String(id))?.name || "Meal slot";
   const dndAnnouncements = {
     onDragStart: ({ active }) => `Picked up ${announceSlotDrag(active.id)}.`,
@@ -646,48 +640,17 @@ function SettingsPage({ data, csrf, theme, notify }) {
   }, [dirty, saveState, savedTimer]);
   const startSlotReorder = () => {
     if (saving || removingSlots.size) return;
-    reorderStartOrderRef.current = slots.map((slot) => slot.id);
-    reorderStartStateRef.current = JSON.stringify(slots);
     setIsReordering(true);
   };
-  const finishSlotReorder = (id) => {
-    const startOrder = reorderStartOrderRef.current;
-    const position = slots.findIndex((slot) => String(slot.id) === String(id));
-    if (position >= 0 && startOrder.indexOf(slots[position].id) !== position) {
-      setAnnouncement("");
-      window.requestAnimationFrame(() => setAnnouncement(`${slots[position].name || "Meal slot"} moved to position ${position + 1} of ${slots.length}.`));
+  const handleSlotDragEnd = ({ active, over }) => {
+    if (over && String(active.id) !== String(over.id)) {
+      const oldIndex = slots.findIndex((slot) => String(slot.id) === String(active.id));
+      const newIndex = slots.findIndex((slot) => String(slot.id) === String(over.id));
+      if (oldIndex >= 0 && newIndex >= 0 && oldIndex !== newIndex) setSlots(arrayMove(slots, oldIndex, newIndex));
     }
     setIsReordering(false);
-    reorderStartOrderRef.current = [];
-    reorderStartStateRef.current = "";
   };
-  const cancelSlotReorder = () => {
-    if (reorderStartStateRef.current) setSlots(JSON.parse(reorderStartStateRef.current));
-    setIsReordering(false);
-    reorderStartOrderRef.current = [];
-    reorderStartStateRef.current = "";
-  };
-  const handleSlotDragOver = ({ active, over }) => {
-    if (!over || active.id === over.id) return;
-    setSlots((current) => {
-      const oldIndex = current.findIndex((slot) => String(slot.id) === String(active.id));
-      const newIndex = current.findIndex((slot) => String(slot.id) === String(over.id));
-      return oldIndex < 0 || newIndex < 0 || oldIndex === newIndex ? current : arrayMove(current, oldIndex, newIndex);
-    });
-  };
-  const handleSlotDragStart = ({ active }) => {
-    setDraggingId(String(active.id));
-    startSlotReorder();
-  };
-  const handleSlotDragEnd = ({ active, over }) => {
-    if (over) finishSlotReorder(active.id);
-    else cancelSlotReorder();
-    setDraggingId("");
-  };
-  const handleSlotDragCancel = () => {
-    cancelSlotReorder();
-    setDraggingId("");
-  };
+  const handleSlotDragCancel = () => setIsReordering(false);
   const moveByKeyboard = (id, direction) => {
     if (saving || isReordering || removingSlots.size) return;
     const index = slots.findIndex((slot) => slot.id === id);
@@ -785,12 +748,12 @@ function SettingsPage({ data, csrf, theme, notify }) {
       <section className="settings-section slot-settings-section" aria-labelledby="slot-settings-heading">
         <h2 id="slot-settings-heading">Meal slots</h2>
         <form id="slot-settings" className="slot-settings-form" autoComplete="off" onSubmit={saveSlots}>
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleSlotDragStart} onDragOver={handleSlotDragOver} onDragEnd={handleSlotDragEnd} onDragCancel={handleSlotDragCancel}
-            accessibility={{ announcements: dndAnnouncements, screenReaderInstructions: { draggable: "To pick up a meal slot, press Space or Enter. Use the arrow keys to move it. Press Space or Enter to drop, or Escape to cancel." } }}>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={startSlotReorder} onDragEnd={handleSlotDragEnd} onDragCancel={handleSlotDragCancel}
+            accessibility={{ announcements: dndAnnouncements, screenReaderInstructions: { draggable: "Use the Move Up and Move Down buttons to reorder this slot with a keyboard. Use a pointer to drag the handle." } }}>
             <SortableContext items={visibleSlots.map((slot) => slot.id)} strategy={verticalListSortingStrategy}>
               <div className="slot-list" id="slot-settings-list">
                 <AnimatePresence initial={false} onExitComplete={completeSlotRemovals}>
-                  {visibleSlots.map((slot, position) => <SlotSettingsRow key={slot.id} slot={slot} position={position} total={visibleSlots.length} saving={saving} disabled={saving || removingSlots.size > 0} dragging={draggingId === String(slot.id)}
+                  {visibleSlots.map((slot, position) => <SlotSettingsRow key={slot.id} slot={slot} position={position} total={visibleSlots.length} saving={saving} disabled={saving || removingSlots.size > 0}
                     onRemove={removeSlot} onReorderKey={moveByKeyboard}
                     onNameChange={(id, name) => { if (saving || isReordering) return; setSlots((current) => current.map((item) => item.id === id ? { ...item, name } : item)); setFeedback(""); }}
                     onTimeChange={(id, time) => { if (saving || isReordering) return; setSlots((current) => current.map((item) => item.id === id ? { ...item, time } : item)); setFeedback(""); }} />)}
