@@ -1,8 +1,67 @@
 // use prisma-8
 
-model OperationalSetting {
+// Todoist planned meals remain authoritative remotely. Cached task rows below
+// are an ephemeral operational cache, not local planned-meal records.
+
+model MealLibraryEntry {
+  id        String @id
+  name      String
+  position  Int
+  createdAt String @default(now()) @map("created_at")
+
+  @@map("meal_library")
+}
+
+model MealSlot {
+  id          String @id
+  name        String
+  time        String
+  position    Int
+  timeAliases String @default("[]") @map("time_aliases")
+  active      Int    @default(1)
+
+  @@map("meal_slots")
+}
+
+// state is intentionally String (not an enum): migration preserves pending,
+// processing, failed, and done verbatim and does not run legacy startup repair.
+model IdempotentAction {
+  requestId     String  @id @map("request_id")
+  kind          String
+  payload       String
+  state         String
+  remoteId      String? @map("remote_id")
+  responseJson  String? @map("response_json")
+  updatedAt     String  @default(now()) @map("updated_at")
+  taskKey       String? @map("task_key")
+  attempts      Int     @default(0)
+  nextAttempt   Float   @default(0) @map("next_attempt")
+  lastError     String? @map("last_error")
+  createAttempted Int  @default(0) @map("create_attempted")
+
+  @@map("idempotent_actions")
+}
+
+model ProjectTaskCache {
+  taskKey   String  @id @map("task_key")
+  remoteId  String? @unique @map("remote_id")
+  projectId String  @map("project_id")
+  taskJson  String  @map("task_json")
+  seenAt    Float   @map("seen_at")
+
+  @@map("project_task_cache")
+}
+
+model TaskTombstone {
+  remoteId String @id @map("remote_id")
+  createdAt Float @map("created_at")
+
+  @@map("task_tombstones")
+}
+
+model Kv {
   key   String @id
   value String
 
-  @@map("operational_settings")
+  @@map("kv")
 }

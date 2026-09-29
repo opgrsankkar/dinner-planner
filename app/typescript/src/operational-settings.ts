@@ -8,16 +8,16 @@ const db = sqlite<Contract>({
 })
 
 export async function readOperationalSetting(key: string): Promise<string | null> {
-  const setting = await db.orm.OperationalSetting.where({ key }).first()
+  const setting = await db.orm.Kv.where({ key }).first()
   return setting?.value ?? null
 }
 
 export async function writeOperationalSetting(key: string, value: string): Promise<void> {
-  const existing = await db.orm.OperationalSetting.where({ key }).first()
+  const existing = await db.orm.Kv.where({ key }).first()
   if (existing) {
-    await db.orm.OperationalSetting.where({ key }).update({ value })
+    await db.orm.Kv.where({ key }).update({ value })
   } else {
-    await db.orm.OperationalSetting.create({ key, value })
+    await db.orm.Kv.create({ key, value })
   }
 }
 

@@ -11,9 +11,11 @@
     "prebuild": "npm run prisma:emit",
     "typecheck": "vite build && tsc --noEmit",
     "prisma:emit": "prisma contract emit",
-    "prisma:plan": "prisma migration plan --name initial",
+    "prisma:plan": "prisma migration plan --name operational-state-contract",
     "prisma:migrate": "prisma db migrate",
-    "test:sqlite": "node scripts/prisma-sqlite-smoke.ts"
+    "test:sqlite": "node scripts/prisma-sqlite-smoke.ts",
+    "test:migration": "node scripts/operational-state-migration-test.ts",
+    "test": "npm run test:sqlite && npm run test:migration"
   },
   "dependencies": {
     "@prisma/orm-sqlite": "8.0.0-rc.13",

@@ -1,0 +1,330 @@
+[
+  {
+    "id": "table.idempotent_actions",
+    "label": "Create table idempotent_actions",
+    "summary": "Creates table idempotent_actions with required columns",
+    "operationClass": "additive",
+    "target": {
+      "id": "sqlite",
+      "details": {
+        "schema": "main",
+        "objectType": "table",
+        "name": "idempotent_actions"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure table \"idempotent_actions\" does not exist",
+        "sql": "SELECT COUNT(*) = 0 AS \"result\" FROM \"sqlite_master\" WHERE (\"type\" = ? AND \"name\" = ?)",
+        "params": [
+          "table",
+          "idempotent_actions"
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create table \"idempotent_actions\"",
+        "sql": "CREATE TABLE \"idempotent_actions\" (\n  \"attempts\" INTEGER NOT NULL DEFAULT 0,\n  \"create_attempted\" INTEGER NOT NULL DEFAULT 0,\n  \"kind\" TEXT NOT NULL,\n  \"last_error\" TEXT,\n  \"next_attempt\" REAL NOT NULL DEFAULT 0,\n  \"payload\" TEXT NOT NULL,\n  \"remote_id\" TEXT,\n  \"request_id\" TEXT NOT NULL,\n  \"response_json\" TEXT,\n  \"state\" TEXT NOT NULL,\n  \"task_key\" TEXT,\n  \"updated_at\" TEXT NOT NULL DEFAULT (datetime('now')),\n  PRIMARY KEY (\"request_id\")\n)",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify table \"idempotent_actions\" exists",
+        "sql": "SELECT COUNT(*) > 0 AS \"result\" FROM \"sqlite_master\" WHERE (\"type\" = ? AND \"name\" = ?)",
+        "params": [
+          "table",
+          "idempotent_actions"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "table.kv",
+    "label": "Create table kv",
+    "summary": "Creates table kv with required columns",
+    "operationClass": "additive",
+    "target": {
+      "id": "sqlite",
+      "details": {
+        "schema": "main",
+        "objectType": "table",
+        "name": "kv"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure table \"kv\" does not exist",
+        "sql": "SELECT COUNT(*) = 0 AS \"result\" FROM \"sqlite_master\" WHERE (\"type\" = ? AND \"name\" = ?)",
+        "params": [
+          "table",
+          "kv"
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create table \"kv\"",
+        "sql": "CREATE TABLE \"kv\" (\n  \"key\" TEXT NOT NULL,\n  \"value\" TEXT NOT NULL,\n  PRIMARY KEY (\"key\")\n)",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify table \"kv\" exists",
+        "sql": "SELECT COUNT(*) > 0 AS \"result\" FROM \"sqlite_master\" WHERE (\"type\" = ? AND \"name\" = ?)",
+        "params": [
+          "table",
+          "kv"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "table.meal_library",
+    "label": "Create table meal_library",
+    "summary": "Creates table meal_library with required columns",
+    "operationClass": "additive",
+    "target": {
+      "id": "sqlite",
+      "details": {
+        "schema": "main",
+        "objectType": "table",
+        "name": "meal_library"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure table \"meal_library\" does not exist",
+        "sql": "SELECT COUNT(*) = 0 AS \"result\" FROM \"sqlite_master\" WHERE (\"type\" = ? AND \"name\" = ?)",
+        "params": [
+          "table",
+          "meal_library"
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create table \"meal_library\"",
+        "sql": "CREATE TABLE \"meal_library\" (\n  \"created_at\" TEXT NOT NULL DEFAULT (datetime('now')),\n  \"id\" TEXT NOT NULL,\n  \"name\" TEXT NOT NULL,\n  \"position\" INTEGER NOT NULL,\n  PRIMARY KEY (\"id\")\n)",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify table \"meal_library\" exists",
+        "sql": "SELECT COUNT(*) > 0 AS \"result\" FROM \"sqlite_master\" WHERE (\"type\" = ? AND \"name\" = ?)",
+        "params": [
+          "table",
+          "meal_library"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "table.meal_slots",
+    "label": "Create table meal_slots",
+    "summary": "Creates table meal_slots with required columns",
+    "operationClass": "additive",
+    "target": {
+      "id": "sqlite",
+      "details": {
+        "schema": "main",
+        "objectType": "table",
+        "name": "meal_slots"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure table \"meal_slots\" does not exist",
+        "sql": "SELECT COUNT(*) = 0 AS \"result\" FROM \"sqlite_master\" WHERE (\"type\" = ? AND \"name\" = ?)",
+        "params": [
+          "table",
+          "meal_slots"
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create table \"meal_slots\"",
+        "sql": "CREATE TABLE \"meal_slots\" (\n  \"active\" INTEGER NOT NULL DEFAULT 1,\n  \"id\" TEXT NOT NULL,\n  \"name\" TEXT NOT NULL,\n  \"position\" INTEGER NOT NULL,\n  \"time\" TEXT NOT NULL,\n  \"time_aliases\" TEXT NOT NULL DEFAULT '[]',\n  PRIMARY KEY (\"id\")\n)",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify table \"meal_slots\" exists",
+        "sql": "SELECT COUNT(*) > 0 AS \"result\" FROM \"sqlite_master\" WHERE (\"type\" = ? AND \"name\" = ?)",
+        "params": [
+          "table",
+          "meal_slots"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "table.project_task_cache",
+    "label": "Create table project_task_cache",
+    "summary": "Creates table project_task_cache with required columns",
+    "operationClass": "additive",
+    "target": {
+      "id": "sqlite",
+      "details": {
+        "schema": "main",
+        "objectType": "table",
+        "name": "project_task_cache"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure table \"project_task_cache\" does not exist",
+        "sql": "SELECT COUNT(*) = 0 AS \"result\" FROM \"sqlite_master\" WHERE (\"type\" = ? AND \"name\" = ?)",
+        "params": [
+          "table",
+          "project_task_cache"
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create table \"project_task_cache\"",
+        "sql": "CREATE TABLE \"project_task_cache\" (\n  \"project_id\" TEXT NOT NULL,\n  \"remote_id\" TEXT,\n  \"seen_at\" REAL NOT NULL,\n  \"task_json\" TEXT NOT NULL,\n  \"task_key\" TEXT NOT NULL,\n  PRIMARY KEY (\"task_key\"),\n  UNIQUE (\"remote_id\")\n)",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify table \"project_task_cache\" exists",
+        "sql": "SELECT COUNT(*) > 0 AS \"result\" FROM \"sqlite_master\" WHERE (\"type\" = ? AND \"name\" = ?)",
+        "params": [
+          "table",
+          "project_task_cache"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "table.task_tombstones",
+    "label": "Create table task_tombstones",
+    "summary": "Creates table task_tombstones with required columns",
+    "operationClass": "additive",
+    "target": {
+      "id": "sqlite",
+      "details": {
+        "schema": "main",
+        "objectType": "table",
+        "name": "task_tombstones"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure table \"task_tombstones\" does not exist",
+        "sql": "SELECT COUNT(*) = 0 AS \"result\" FROM \"sqlite_master\" WHERE (\"type\" = ? AND \"name\" = ?)",
+        "params": [
+          "table",
+          "task_tombstones"
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create table \"task_tombstones\"",
+        "sql": "CREATE TABLE \"task_tombstones\" (\n  \"created_at\" REAL NOT NULL,\n  \"remote_id\" TEXT NOT NULL,\n  PRIMARY KEY (\"remote_id\")\n)",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify table \"task_tombstones\" exists",
+        "sql": "SELECT COUNT(*) > 0 AS \"result\" FROM \"sqlite_master\" WHERE (\"type\" = ? AND \"name\" = ?)",
+        "params": [
+          "table",
+          "task_tombstones"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "index.meal_library_name_nocase",
+    "label": "Create NOCASE unique index meal_library_name_nocase",
+    "summary": "Preserve the legacy case-insensitive unique meal name constraint",
+    "operationClass": "additive",
+    "target": {
+      "id": "sqlite",
+      "details": {
+        "schema": "main",
+        "objectType": "index",
+        "name": "meal_library_name_nocase",
+        "table": "meal_library"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure index \"meal_library_name_nocase\" does not exist",
+        "sql": "SELECT COUNT(*) = 0 AS \"result\" FROM \"sqlite_master\" WHERE (\"type\" = ? AND \"name\" = ?)",
+        "params": [
+          "index",
+          "meal_library_name_nocase"
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create case-insensitive unique meal library index",
+        "sql": "CREATE UNIQUE INDEX \"meal_library_name_nocase\" ON \"meal_library\" (\"name\" COLLATE NOCASE)",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify index \"meal_library_name_nocase\" exists",
+        "sql": "SELECT COUNT(*) > 0 AS \"result\" FROM \"sqlite_master\" WHERE (\"type\" = ? AND \"name\" = ?)",
+        "params": [
+          "index",
+          "meal_library_name_nocase"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "dropTable.operational_settings",
+    "label": "Drop table operational_settings",
+    "summary": "Drops table operational_settings which is not in the contract",
+    "operationClass": "destructive",
+    "target": {
+      "id": "sqlite",
+      "details": {
+        "schema": "main",
+        "objectType": "table",
+        "name": "operational_settings"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure table \"operational_settings\" exists",
+        "sql": "SELECT COUNT(*) > 0 AS \"result\" FROM \"sqlite_master\" WHERE (\"type\" = ? AND \"name\" = ?)",
+        "params": [
+          "table",
+          "operational_settings"
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "drop table \"operational_settings\"",
+        "sql": "DROP TABLE \"operational_settings\""
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify table \"operational_settings\" is gone",
+        "sql": "SELECT COUNT(*) = 0 AS \"result\" FROM \"sqlite_master\" WHERE (\"type\" = ? AND \"name\" = ?)",
+        "params": [
+          "table",
+          "operational_settings"
+        ]
+      }
+    ]
+  }
+]
