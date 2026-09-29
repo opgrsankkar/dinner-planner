@@ -32,7 +32,7 @@ Login throttling allows five failed attempts per client IP in a rolling five-min
 
 This milestone adds only the authentication and security foundation under `src/security`, `/login`, `/logout`, and the small authenticated landing page. It does not add planner/settings routes, Todoist calls, or an outbox, and it does not modify the Python/React runtime or deployment configuration.
 
-`npm test` runs the authentication unit tests, built-server HTTP integration tests, fresh-database Prisma smoke, and deterministic legacy compatibility harness. The migration harness extracts the exact `SCHEMA` literal from `app/db.py` with Python's AST, creates a legacy source fixture and a separate SQLite backup copy under a newly created OS temporary directory, and applies the checked-in Prisma migrations to another temporary target. It imports only from the temporary copy, opened read-only, into the empty target.
+`npm test` runs the authentication unit tests, built-server HTTP integration tests, a fresh-database Prisma smoke, the meal-library invariant verifier cases, and the deterministic legacy compatibility harness. All migration tests and smokes apply Prisma migrations through the supported wrapper. The legacy compatibility harness extracts the exact `SCHEMA` literal from `app/db.py` with Python's AST, creates a legacy source fixture and a separate SQLite backup copy under a newly created OS temporary directory, and applies the checked-in Prisma migrations to another temporary target. It imports only from the temporary copy, opened read-only, into the empty target.
 
 The harness proves on representative synthetic rows that:
 
@@ -42,13 +42,25 @@ The harness proves on representative synthetic rows that:
 - a source row with a null text primary key is rejected before writing, a forced insert failure rolls the whole data-copy transaction back, and a repeat import refuses a populated target without changing it;
 - cached Todoist task records remain in `project_task_cache` and no local planned-meal table is created.
 
-Every database path in this harness is an explicit file under the fresh OS temporary root. The importer itself rejects relative paths and paths outside that root. The test never opens, copies, or writes `/data/meals.sqlite3` or any other deployment database.
+Every database path in the migration harness is an explicit file under its fresh OS temporary root. The importer itself rejects relative paths and paths outside that root. The tests never open, copy, or write `/data/meals.sqlite3` or any other deployment database.
 
-## Prisma SQLite semantic blocker
+## Meal-library uniqueness invariant
 
-Legacy `meal_library.name` is declared `TEXT NOT NULL COLLATE NOCASE UNIQUE`. Prisma ORM 8 `8.0.0-rc.13` rejects SQLite expression indexes, including `@@index(expression: "name COLLATE NOCASE", unique: true)`, with `CONTRACT.SOURCE_LOAD_FAILED`. The checked-in migration therefore uses a reviewed raw SQLite operation to recreate the unique `NOCASE` index, and the harness checks that the physical index rejects case-only duplicates. The harness also drops the index in its temporary target, confirms `prisma db verify` still reports that the schema matches, then restores it. Prisma's contract and verifier do not encode that collation rule, so future migrations cannot prove that the raw index remains present. This is a concrete cutover blocker until Prisma can represent the index or the project adopts a durable, independently verified custom invariant for every migration.
+Legacy `meal_library.name` is declared `TEXT NOT NULL COLLATE NOCASE UNIQUE`. The locked Prisma SQLite package `@prisma/orm-sqlite@8.0.0-rc.13` cannot represent this collation-specific unique index in its contract, so the checked-in migration retains a reviewed raw SQLite operation that creates `meal_library_name_nocase`. This operation is intentionally unchanged. The locked `prisma@8.0.0-rc.18` CLI supports `prisma db migrate --db <url>`; the wrapper calls that command with the required explicit database path.
 
-SQLite also permits null values in these legacy non-integer `TEXT PRIMARY KEY` columns despite their primary-key declarations. Prisma `@id` emits `NOT NULL`; the importer detects and rejects null source keys before it begins the transaction. App code writes non-null IDs, but a production-data audit must verify this precondition before any migration.
+Use the supported wrapper for every migration:
+
+```sh
+npm run prisma:migrate -- --db ./operational.sqlite3
+```
+
+The wrapper requires an explicit `--db <path>`, applies `prisma db migrate` to that path, then runs the custom invariant verifier. The verifier opens an existing database read-only and checks SQLite's physical metadata for the `meal_library` table, its visible non-null `TEXT` `name` column, and exactly one non-partial unique `meal_library_name_nocase` index on that column with `NOCASE` collation. It checks `sqlite_schema`, `PRAGMA table_list`, `PRAGMA table_xinfo`, `PRAGMA index_list`, and `PRAGMA index_xinfo`; it does not infer the invariant from the saved SQL text.
+
+The contract gap is demonstrated by the temporary tests: after the custom index is dropped, Prisma ORM `8.0.0-rc.13` `prisma db verify --db <path>` still succeeds, while the custom verifier and migration wrapper fail. Raw Prisma migration or verification commands alone therefore do not establish migration readiness. The wrapper is the supported migration command and must succeed before a database is considered ready under this invariant.
+
+## Separate importer preflight
+
+SQLite permits null values in legacy non-integer `TEXT PRIMARY KEY` columns despite their primary-key declarations. Prisma `@id` emits `NOT NULL`; the importer separately detects and rejects null source keys before beginning its transaction. This is an importer check, not part of the meal-library invariant verifier. Imported values are copied as stored and are not normalized. Any production-data audit must independently verify the null-key precondition before migration.
 
 ## What this test does not prove
 
@@ -59,9 +71,9 @@ Production migration remains gated on a verified backup of the exact production 
 ## Roadmap
 
 1. **Foundation:** isolated TanStack Start `/healthz`, strict TypeScript, Node 26, and a fresh temporary SQLite smoke test.
-2. **Operational-state migration proof:** model legacy operational data and test a synthetic copy migration with explicit blockers and production backup/rollback gates. This phase does not qualify production data.
+2. **Operational-state migration proof:** model legacy operational data and test a synthetic copy migration with an explicit custom check for the raw SQLite collation invariant and production backup/rollback gates. This phase does not qualify production data.
 3. **TypeScript authentication/security:** port the existing password, signed-session, host validation, CSRF, rate-limit, and response-header foundation into the isolated TypeScript app.
-4. **Production runtime cutover:** a separate future phase after the contract gap, production-data audit, backup, restore, and operational-readiness gates are resolved. Todoist remains authoritative for planned meals.
+4. **Production runtime cutover:** a separate future phase after the production-data audit, backup, restore, and operational-readiness gates are resolved. Todoist remains authoritative for planned meals.
 
 ## Official setup references
 

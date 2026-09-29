@@ -12,10 +12,11 @@
     "typecheck": "vite build && tsc --noEmit",
     "prisma:emit": "prisma contract emit",
     "prisma:plan": "prisma migration plan --name operational-state-contract",
-    "prisma:migrate": "prisma db migrate",
+    "prisma:migrate": "node scripts/prisma-migrate-with-invariant.ts",
     "test:sqlite": "node scripts/prisma-sqlite-smoke.ts",
+    "test:invariant": "node scripts/meal-library-invariant-test.ts",
     "test:migration": "node scripts/operational-state-migration-test.ts",
-    "test": "npm run test:security && npm run test:server && npm run test:sqlite && npm run test:migration",
+    "test": "npm run test:security && npm run test:server && npm run test:sqlite && npm run test:invariant && npm run test:migration",
     "test:security": "node --test tests/security.test.ts",
     "test:server": "npm run build && node --test tests/server.integration.test.ts"
   },

@@ -1,21 +1,36 @@
 import { spawnSync } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative, resolve, sep } from 'node:path'
 
 const tempDir = await mkdtemp(join(tmpdir(), 'dinner-planner-prisma8-'))
 const databasePath = join(tempDir, 'fresh-test.sqlite3')
-const prisma = join(process.cwd(), 'node_modules', '.bin', 'prisma')
+const migrationWrapper = join(process.cwd(), 'scripts', 'prisma-migrate-with-invariant.ts')
 process.env.DATABASE_PATH = databasePath
 let closeDatabase: () => Promise<void> = async () => {}
 
 try {
-  const migration = spawnSync(prisma, ['db', 'migrate', '--db', databasePath], {
+  const relativeToTempRoot = relative(resolve(tempDir), resolve(databasePath))
+  const relativeToOsTemp = relative(resolve(tmpdir()), resolve(databasePath))
+  if (
+    relativeToTempRoot.length === 0 ||
+    relativeToTempRoot === '..' ||
+    relativeToTempRoot.startsWith(`..${sep}`) ||
+    relativeToOsTemp === '..' ||
+    relativeToOsTemp.startsWith(`..${sep}`) ||
+    resolve(databasePath) === '/data' ||
+    resolve(databasePath).startsWith(`/data${sep}`)
+  ) {
+    throw new Error('SQLite smoke database path must remain under its fresh OS temporary directory')
+  }
+
+  const migration = spawnSync(process.execPath, [migrationWrapper, '--db', databasePath], {
+    cwd: process.cwd(),
     env: { ...process.env, DATABASE_PATH: databasePath },
     encoding: 'utf8',
   })
   if (migration.status !== 0) {
-    throw new Error(`Prisma migration failed:\n${migration.stdout}\n${migration.stderr}`)
+    throw new Error(`Supported Prisma migration failed:\n${migration.stdout}\n${migration.stderr}`)
   }
 
   const {
@@ -33,6 +48,9 @@ try {
   }
   console.log('Prisma ORM 8 SQLite migration and operational-setting read/write passed on a fresh temporary database.')
 } finally {
-  await closeDatabase()
-  await rm(tempDir, { recursive: true, force: true })
+  try {
+    await closeDatabase()
+  } finally {
+    await rm(tempDir, { recursive: true, force: true })
+  }
 }

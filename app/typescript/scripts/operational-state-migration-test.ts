@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { DatabaseSync } from 'node:sqlite'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { migrateLegacyOperationalData, legacyOperationalTables } from '../src/legacy-operational-migration.ts'
 
@@ -15,7 +15,16 @@ const legacySource = join(tempRoot, 'legacy-source', 'legacy.sqlite3')
 const migrationCopy = join(tempRoot, 'migration-input', 'legacy-copy.sqlite3')
 const nullKeyCopy = join(tempRoot, 'invalid-legacy-input', 'null-key.sqlite3')
 const targetDatabase = join(tempRoot, 'prisma-target', 'operational-state.sqlite3')
-const prismaBin = join(projectRoot, 'node_modules', '.bin', 'prisma')
+const migrationWrapper = join(projectRoot, 'scripts', 'prisma-migrate-with-invariant.ts')
+
+function assertTemporaryDatabasePath(databasePath: string): void {
+  const absolutePath = resolve(databasePath)
+  const pathFromRoot = relative(resolve(tempRoot), absolutePath)
+  const pathFromOsTemp = relative(resolve(tmpdir()), absolutePath)
+  assert.ok(pathFromRoot.length > 0 && pathFromRoot !== '..' && !pathFromRoot.startsWith(`..${sep}`))
+  assert.ok(pathFromOsTemp !== '..' && !pathFromOsTemp.startsWith(`..${sep}`))
+  assert.equal(absolutePath === '/data' || absolutePath.startsWith(`/data${sep}`), false)
+}
 
 interface FixtureManifest {
   readonly tables: Record<string, readonly (string | number | null)[][]>
@@ -142,16 +151,19 @@ function expectConstraint(database: DatabaseSync, label: string, attempt: () => 
 
 let target: DatabaseSync | undefined
 try {
+  for (const databasePath of [legacySource, migrationCopy, nullKeyCopy, targetDatabase]) {
+    assertTemporaryDatabasePath(databasePath)
+  }
   const manifest = buildLegacyFixture()
   await mkdir(join(targetDatabase, '..'), { recursive: true })
 
-  const prismaMigration = spawnSync(prismaBin, ['db', 'migrate', '--db', targetDatabase], {
+  const prismaMigration = spawnSync(process.execPath, [migrationWrapper, '--db', targetDatabase], {
     cwd: projectRoot,
     env: { ...process.env, DATABASE_PATH: targetDatabase },
     encoding: 'utf8',
   })
   if (prismaMigration.status !== 0) {
-    throw new Error(`Prisma 8 schema migration failed:\n${prismaMigration.stdout}\n${prismaMigration.stderr}`)
+    throw new Error(`Supported Prisma schema migration failed:\n${prismaMigration.stdout}\n${prismaMigration.stderr}`)
   }
 
   target = new DatabaseSync(targetDatabase)
@@ -236,25 +248,6 @@ try {
   expectConstraint(target, 'kv primary key', () => target!.exec('INSERT INTO kv SELECT * FROM kv LIMIT 1'))
   expectConstraint(target, 'Prisma primary keys reject NULL values', () => target!.exec("INSERT INTO kv(key,value) VALUES(NULL,'invalid')"))
 
-  target.exec('DROP INDEX "meal_library_name_nocase"')
-  const prismaVerifyWithoutNoCaseIndex = spawnSync(prismaBin, ['db', 'verify', '--db', targetDatabase], {
-    cwd: projectRoot,
-    env: { ...process.env, DATABASE_PATH: targetDatabase },
-    encoding: 'utf8',
-  })
-  assert.equal(
-    prismaVerifyWithoutNoCaseIndex.status,
-    0,
-    'Prisma 8 db verify currently misses the unrepresented legacy collation constraint; keep this as a documented cutover blocker',
-  )
-  assert.match(prismaVerifyWithoutNoCaseIndex.stdout, /Database marker and schema match contract/)
-  target.exec(noCaseIndex.sql)
-  assert.equal(
-    target.prepare(`SELECT COUNT(*) AS count FROM sqlite_master WHERE type='index' AND name='meal_library_name_nocase'`).get()?.count,
-    1,
-    'restore the required temporary index after demonstrating the verifier gap',
-  )
-
   target.exec('SAVEPOINT nullable_remote_id_test')
   target
     .prepare('INSERT INTO project_task_cache(task_key,remote_id,project_id,task_json,seen_at) VALUES(?,?,?,?,?)')
@@ -283,6 +276,9 @@ try {
 
   console.log('Prisma 8 operational schema migration, legacy copy import, constraints, retry state, and rollback checks passed.')
 } finally {
-  target?.close()
-  await rm(tempRoot, { recursive: true, force: true })
+  try {
+    target?.close()
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
+  }
 }
