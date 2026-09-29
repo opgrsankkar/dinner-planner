@@ -44,6 +44,12 @@ The harness proves on representative synthetic rows that:
 
 Every database path in the migration harness is an explicit file under its fresh OS temporary root. The importer itself rejects relative paths and paths outside that root. The tests never open, copy, or write `/data/meals.sqlite3` or any other deployment database.
 
+## Read-only Todoist API client
+
+The TypeScript stack now includes an explicitly token-injected Todoist client with GET-only methods for exact project lookup, active-task reads, single-task reads, and completed-task reads. It uses the Todoist API v1 endpoint, a 20-second timeout, bounded response errors, and cursor-loop protection. Its tests inject a fake fetch transport and make no Todoist requests. No application routes, settings APIs, repositories, cache writes, outbox work, or mutation methods are part of this phase.
+
+Todoist remains the source of truth for planned meals. This client does not create a `planned_meals` table or local planned-meal authority. The next integration phase can connect the client to authenticated planner data loading and display while keeping Todoist authoritative; any caching or write behavior requires separate scoped work.
+
 ## Meal-library uniqueness invariant
 
 Legacy `meal_library.name` is declared `TEXT NOT NULL COLLATE NOCASE UNIQUE`. The locked Prisma SQLite package `@prisma/orm-sqlite@8.0.0-rc.13` cannot represent this collation-specific unique index in its contract, so the checked-in migration retains a reviewed raw SQLite operation that creates `meal_library_name_nocase`. This operation is intentionally unchanged. The locked `prisma@8.0.0-rc.18` CLI supports `prisma db migrate --db <url>`; the wrapper calls that command with the required explicit database path.
@@ -73,7 +79,9 @@ Production migration remains gated on a verified backup of the exact production 
 1. **Foundation:** isolated TanStack Start `/healthz`, strict TypeScript, Node 26, and a fresh temporary SQLite smoke test.
 2. **Operational-state migration proof:** model legacy operational data and test a synthetic copy migration with an explicit custom check for the raw SQLite collation invariant and production backup/rollback gates. This phase does not qualify production data.
 3. **TypeScript authentication/security:** port the existing password, signed-session, host validation, CSRF, rate-limit, and response-header foundation into the isolated TypeScript app.
-4. **Production runtime cutover:** a separate future phase after the production-data audit, backup, restore, and operational-readiness gates are resolved. Todoist remains authoritative for planned meals.
+4. **Read-only Todoist client:** explicit token injection, GET-only typed reads, and offline fake-transport tests without application routes or data writes.
+5. **Read integration:** connect the client to authenticated planner data loading and display while preserving Todoist as the planned-meal authority; keep cache and mutation choices in separate phases.
+6. **Production runtime cutover:** a separate future phase after the production-data audit, backup, restore, and operational-readiness gates are resolved.
 
 ## Official setup references
 
