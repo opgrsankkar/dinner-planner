@@ -1,0 +1,8 @@
+// use prisma-8
+
+model OperationalSetting {
+  key   String @id
+  value String
+
+  @@map("operational_settings")
+}

@@ -1,0 +1,14 @@
+node_modules/
+.data/
+.output/
+.tanstack/
+dist/
+src/routeTree.gen.ts
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-shm
+*.sqlite3-wal

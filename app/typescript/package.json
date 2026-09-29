@@ -1,0 +1,35 @@
+{
+  "name": "dinner-planner-typescript-foundation",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=26.0.0 <27"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "prebuild": "npm run prisma:emit",
+    "typecheck": "vite build && tsc --noEmit",
+    "prisma:emit": "prisma contract emit",
+    "prisma:plan": "prisma migration plan --name initial",
+    "prisma:migrate": "prisma db migrate",
+    "test:sqlite": "node scripts/prisma-sqlite-smoke.ts"
+  },
+  "dependencies": {
+    "@prisma/orm-sqlite": "8.0.0-rc.13",
+    "@tanstack/react-router": "1.170.40",
+    "@tanstack/react-start": "1.168.59",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@prisma/cli-engine": "0.6.1",
+    "@types/node": "26.6.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "prisma": "8.0.0-rc.18",
+    "typescript": "7.0.2",
+    "vite": "8.3.1"
+  }
+}
