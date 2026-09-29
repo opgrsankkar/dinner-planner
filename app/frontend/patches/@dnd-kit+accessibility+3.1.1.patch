@@ -1,0 +1,48 @@
+diff --git a/node_modules/@dnd-kit/accessibility/dist/accessibility.esm.js b/node_modules/@dnd-kit/accessibility/dist/accessibility.esm.js
+index 695e822..e4c3a24 100644
+--- a/node_modules/@dnd-kit/accessibility/dist/accessibility.esm.js
++++ b/node_modules/@dnd-kit/accessibility/dist/accessibility.esm.js
+@@ -1,8 +1,5 @@
+ import React, { useState, useCallback } from 'react';
+
+-const hiddenStyles = {
+-  display: 'none'
+-};
+ function HiddenText(_ref) {
+   let {
+     id,
+@@ -10,7 +7,7 @@ function HiddenText(_ref) {
+   } = _ref;
+   return React.createElement("div", {
+     id: id,
+-    style: hiddenStyles
++    className: "dnd-kit-hidden-text"
+   }, value);
+ }
+
+@@ -20,24 +17,9 @@ function LiveRegion(_ref) {
+     announcement,
+     ariaLiveType = "assertive"
+   } = _ref;
+-  // Hide element visually but keep it readable by screen readers
+-  const visuallyHidden = {
+-    position: 'fixed',
+-    top: 0,
+-    left: 0,
+-    width: 1,
+-    height: 1,
+-    margin: -1,
+-    border: 0,
+-    padding: 0,
+-    overflow: 'hidden',
+-    clip: 'rect(0 0 0 0)',
+-    clipPath: 'inset(100%)',
+-    whiteSpace: 'nowrap'
+-  };
+   return React.createElement("div", {
+     id: id,
+-    style: visuallyHidden,
++    className: "dnd-kit-live-region",
+     role: "status",
+     "aria-live": ariaLiveType,
+     "aria-atomic": true

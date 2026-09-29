@@ -1,6 +1,7 @@
 FROM node:22-bookworm-slim AS frontend-build
 WORKDIR /frontend
 COPY app/frontend/package*.json ./
+COPY app/frontend/patches ./patches
 RUN npm ci --no-audit --no-fund
 COPY app/frontend/src ./src
 RUN mkdir -p /build && ./node_modules/.bin/esbuild src/main.jsx --bundle --minify --target=es2020 --outfile=/build/planner.bundle.js

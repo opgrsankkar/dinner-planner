@@ -1,6 +1,9 @@
-import React, { forwardRef, useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { AnimatePresence, Reorder, motion, useDragControls, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useDragControls, useReducedMotion } from "motion/react";
+import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
 const uuid = () => window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -517,13 +520,28 @@ function PlannerBoard({ data, csrf, theme, notify }) {
   </>;
 }
 
-const SlotSettingsRow = forwardRef(function SlotSettingsRow({ slot, saving, dragging, position, total, onRemove, onReorderKey, onReorderStart, onReorderEnd, onNameChange, onTimeChange }, ref) {
+function SlotSettingsRow({ slot, saving, disabled, position, total, onRemove, onReorderKey, onNameChange, onTimeChange }) {
   const swipeControls = useDragControls();
-  const reorderControls = useDragControls();
   const reduceMotion = useReducedMotion();
   const [reorderActionsOpen, setReorderActionsOpen] = useState(false);
-  const pointerStartRef = useRef(null);
   const suppressPostDragClickRef = useRef(false);
+  const {
+    attributes, listeners, setNodeRef, setActivatorNodeRef, node, transform, transition, isDragging,
+  } = useSortable({ id: slot.id, disabled });
+  useLayoutEffect(() => {
+    const element = node.current;
+    if (!element) return;
+    if (transform) element.style.setProperty("--sortable-transform", CSS.Transform.toString(transform));
+    else element.style.removeProperty("--sortable-transform");
+    if (transition) element.style.setProperty("--sortable-transition", transition);
+    else element.style.removeProperty("--sortable-transition");
+  }, [node, transform, transition]);
+  useEffect(() => {
+    if (isDragging) {
+      suppressPostDragClickRef.current = true;
+      setReorderActionsOpen(false);
+    }
+  }, [isDragging]);
   useEffect(() => {
     if (!reorderActionsOpen) return;
     const closeOnOutsidePointer = (event) => {
@@ -538,29 +556,34 @@ const SlotSettingsRow = forwardRef(function SlotSettingsRow({ slot, saving, drag
     if (saving || (event.pointerType !== "touch" && event.pointerType !== "pen") || event.target.closest("button")) return;
     swipeControls.start(event, { distanceThreshold: 10 });
   };
-  return <Reorder.Item ref={ref} as="div" className="slot-row-shell" data-slot-id={slot.id} value={slot} dragListener={false} dragControls={reorderControls}
-    onDragStart={() => { suppressPostDragClickRef.current = true; setReorderActionsOpen(false); onReorderStart(slot.id); }} onDragEnd={() => onReorderEnd(slot.id)}
-    whileDrag={{ zIndex: 5 }}
-    transition={reduceMotion ? { layout: { duration: 0 } } : { layout: { type: "spring", stiffness: 700, damping: 50 } }}
-    layout exit={{ x: "-110%", opacity: 0, height: 0, transition: { duration: reduceMotion ? 0 : 0.32, ease: [0.2, 0.72, 0.25, 1] } }}>
-    <motion.div className={`slot-edit-row${dragging ? " slot-dragging" : ""}${reorderActionsOpen ? " reorder-actions-open" : ""}`} data-slot-id={slot.id}
+  const handleGripPointerDown = (event) => {
+    event.stopPropagation();
+    suppressPostDragClickRef.current = false;
+    listeners?.onPointerDown?.(event);
+  };
+  const transformTemplate = (_, generated) => {
+    const sortableTransform = "var(--sortable-transform, translate3d(0, 0, 0))";
+    return generated && generated !== "none" ? `${sortableTransform} ${generated}` : sortableTransform;
+  };
+  return <motion.div ref={setNodeRef} className={`slot-row-shell${isDragging ? " sortable-dragging" : ""}`} data-slot-id={slot.id} data-sortable-id={slot.id}
+    transformTemplate={transformTemplate} exit={{ x: "-110%", opacity: 0, height: 0, transition: { duration: reduceMotion ? 0 : 0.32, ease: [0.2, 0.72, 0.25, 1] } }}>
+    <motion.div className={`slot-edit-row${reorderActionsOpen ? " reorder-actions-open" : ""}`} data-slot-id={slot.id}
       drag={!saving ? "x" : false} dragListener={false} dragControls={swipeControls} dragConstraints={{ left: -160, right: 0 }} dragElastic={0.06} dragMomentum={false} dragDirectionLock
       whileDrag={{ boxShadow: "0 8px 18px rgba(28,55,39,.18)" }}
       onPointerDown={startSwipe} onDragEnd={(event, info) => { if ((event.pointerType === "touch" || event.pointerType === "pen") && info.offset.x <= -76) onRemove(slot.id); }}>
       <div className="slot-order-controls" role="group" aria-label={`Reorder ${slot.name}`} onBlur={(event) => { if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setReorderActionsOpen(false); }}>
-        <button type="button" className="slot-order-step" aria-label={`Move ${slot.name} up`} title={`Move ${slot.name} up`} disabled={saving || position === 0} onClick={() => onReorderKey(slot.id, -1)}>↑</button>
-        <motion.button type="button" className="slot-edit-grip" aria-label={`Drag to reorder ${slot.name}; tap to show move buttons`} title="Drag to reorder; tap to show move buttons" disabled={saving}
-          onPointerDown={(event) => { event.stopPropagation(); if (saving || (event.button !== undefined && event.button !== 0)) return; suppressPostDragClickRef.current = false; pointerStartRef.current = { x: event.clientX, y: event.clientY, pointerType: event.pointerType }; reorderControls.start(event, { distanceThreshold: event.pointerType === "touch" || event.pointerType === "pen" ? 10 : 5 }); }}
-          onPointerUp={(event) => { const start = pointerStartRef.current; pointerStartRef.current = null; const threshold = start?.pointerType === "touch" || start?.pointerType === "pen" ? 10 : 5; if (start && !suppressPostDragClickRef.current && Math.hypot(event.clientX - start.x, event.clientY - start.y) < threshold) setReorderActionsOpen(true); }}
-          onPointerCancel={() => { pointerStartRef.current = null; }} onClick={(event) => { event.stopPropagation(); if (suppressPostDragClickRef.current) { suppressPostDragClickRef.current = false; return; } setReorderActionsOpen(true); }}>⠿</motion.button>
-        <button type="button" className="slot-order-step" aria-label={`Move ${slot.name} down`} title={`Move ${slot.name} down`} disabled={saving || position >= total - 1} onClick={() => onReorderKey(slot.id, 1)}>↓</button>
+        <button type="button" className="slot-order-step" aria-label={`Move ${slot.name} up`} title={`Move ${slot.name} up`} disabled={disabled || position === 0} onClick={() => onReorderKey(slot.id, -1)}>↑</button>
+        <motion.button ref={setActivatorNodeRef} type="button" className="slot-edit-grip" aria-label={`Drag to reorder ${slot.name}; tap to show move buttons`} title="Drag to reorder; tap to show move buttons" disabled={disabled}
+          {...attributes} {...listeners} onPointerDown={handleGripPointerDown}
+          onClick={(event) => { event.stopPropagation(); if (suppressPostDragClickRef.current) { suppressPostDragClickRef.current = false; return; } setReorderActionsOpen(true); }}>⠿</motion.button>
+        <button type="button" className="slot-order-step" aria-label={`Move ${slot.name} down`} title={`Move ${slot.name} down`} disabled={disabled || position >= total - 1} onClick={() => onReorderKey(slot.id, 1)}>↓</button>
       </div>
       <label><span className="visually-hidden">Meal slot label</span><input className="slot-name" name="meal_slot_label" aria-label="Meal slot label" autoComplete="off" autoCapitalize="words" autoCorrect="off" spellCheck="false" maxLength={32} required disabled={saving} value={slot.name} onChange={(event) => onNameChange(slot.id, event.target.value)} /></label>
       <label><span className="visually-hidden">Preset time</span><input className="slot-time" aria-label="Preset time" type="time" required disabled={saving} value={slot.time} onChange={(event) => onTimeChange(slot.id, event.target.value)} /></label>
-      <button type="button" className="remove-slot" aria-label={`Remove ${slot.name}`} title="Remove meal slot" disabled={saving} onPointerDown={(event) => event.stopPropagation()} onClick={() => onRemove(slot.id)}><svg className="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 6h18M8 6V4h8v2m2 0-1 14H7L6 6m4 5v6m4-6v6" /></svg></button>
+      <button type="button" className="remove-slot" aria-label={`Remove ${slot.name}`} title="Remove meal slot" disabled={disabled} onPointerDown={(event) => event.stopPropagation()} onClick={() => onRemove(slot.id)}><svg className="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 6h18M8 6V4h8v2m2 0-1 14H7L6 6m4 5v6m4-6v6" /></svg></button>
     </motion.div>
-  </Reorder.Item>;
-});
+  </motion.div>;
+}
 
 function SettingsPage({ data, csrf, theme, notify }) {
   const [slots, setSlots] = useState(data.slots || []);
@@ -574,17 +597,22 @@ function SettingsPage({ data, csrf, theme, notify }) {
   const [savedTimer, setSavedTimer] = useState(null);
   const [removingSlots, setRemovingSlots] = useState(new Set());
   const [removingMeals, setRemovingMeals] = useState(new Set());
-  const [draggingId, setDraggingId] = useState("");
   const [isReordering, setIsReordering] = useState(false);
   const [announcement, setAnnouncement] = useState("");
-  const reorderStartOrderRef = useRef([]);
-  const reorderStartStateRef = useRef("");
   const removingSlotsRef = useRef(new Set());
   const baseline = useRef(JSON.stringify(data.slots || []));
   const valid = slots.length > 0 && slots.length <= 12 && slots.every((slot) => slot.name.trim() && /^([01]\d|2[0-3]):[0-5]\d$/.test(slot.time)) && new Set(slots.map((slot) => slot.time)).size === slots.length;
-  const dirty = (isReordering ? reorderStartStateRef.current !== baseline.current : JSON.stringify(slots) !== baseline.current) || removingSlots.size > 0;
+  const dirty = JSON.stringify(slots) !== baseline.current || removingSlots.size > 0;
   const visibleSlots = slots.filter((slot) => !removingSlots.has(slot.id));
   const filteredLibrary = library.filter((meal) => meal.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const announceSlotDrag = (id) => slots.find((slot) => String(slot.id) === String(id))?.name || "Meal slot";
+  const dndAnnouncements = {
+    onDragStart: ({ active }) => `Picked up ${announceSlotDrag(active.id)}.`,
+    onDragOver: ({ active, over }) => over ? `${announceSlotDrag(active.id)} over position ${visibleSlots.findIndex((slot) => String(slot.id) === String(over.id)) + 1} of ${visibleSlots.length}.` : `${announceSlotDrag(active.id)} is not over a drop target.`,
+    onDragEnd: ({ active, over }) => over ? `${announceSlotDrag(active.id)} moved to position ${visibleSlots.findIndex((slot) => String(slot.id) === String(over.id)) + 1} of ${visibleSlots.length}.` : `${announceSlotDrag(active.id)} was dropped.`,
+    onDragCancel: ({ active }) => `Dragging ${announceSlotDrag(active.id)} was cancelled.`,
+  };
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -610,25 +638,19 @@ function SettingsPage({ data, csrf, theme, notify }) {
       setSaveState("idle");
     }
   }, [dirty, saveState, savedTimer]);
-  const startSlotReorder = (id) => {
+  const startSlotReorder = () => {
     if (saving || removingSlots.size) return;
-    reorderStartOrderRef.current = slots.map((slot) => slot.id);
-    reorderStartStateRef.current = JSON.stringify(slots);
-    setDraggingId(id);
     setIsReordering(true);
   };
-  const finishSlotReorder = (id) => {
-    const startOrder = reorderStartOrderRef.current;
-    const position = slots.findIndex((slot) => slot.id === id);
-    if (position >= 0 && startOrder.indexOf(id) !== position) {
-      setAnnouncement("");
-      window.requestAnimationFrame(() => setAnnouncement(`${slots[position].name || "Meal slot"} moved to position ${position + 1} of ${slots.length}.`));
+  const handleSlotDragEnd = ({ active, over }) => {
+    if (over && String(active.id) !== String(over.id)) {
+      const oldIndex = slots.findIndex((slot) => String(slot.id) === String(active.id));
+      const newIndex = slots.findIndex((slot) => String(slot.id) === String(over.id));
+      if (oldIndex >= 0 && newIndex >= 0 && oldIndex !== newIndex) setSlots(arrayMove(slots, oldIndex, newIndex));
     }
-    setDraggingId("");
     setIsReordering(false);
-    reorderStartOrderRef.current = [];
-    reorderStartStateRef.current = "";
   };
+  const handleSlotDragCancel = () => setIsReordering(false);
   const moveByKeyboard = (id, direction) => {
     if (saving || isReordering || removingSlots.size) return;
     const index = slots.findIndex((slot) => slot.id === id);
@@ -726,14 +748,19 @@ function SettingsPage({ data, csrf, theme, notify }) {
       <section className="settings-section slot-settings-section" aria-labelledby="slot-settings-heading">
         <h2 id="slot-settings-heading">Meal slots</h2>
         <form id="slot-settings" className="slot-settings-form" autoComplete="off" onSubmit={saveSlots}>
-          <Reorder.Group as="div" axis="y" className="slot-list" id="slot-settings-list" values={visibleSlots} onReorder={(next) => { if (!saving && !removingSlots.size) setSlots(next); }}>
-            <AnimatePresence initial={false} onExitComplete={completeSlotRemovals}>
-              {visibleSlots.map((slot, position) => <SlotSettingsRow key={slot.id} slot={slot} position={position} total={visibleSlots.length} saving={saving} dragging={draggingId === slot.id}
-                onRemove={removeSlot} onReorderKey={moveByKeyboard} onReorderStart={startSlotReorder} onReorderEnd={finishSlotReorder}
-                onNameChange={(id, name) => { if (saving || isReordering) return; setSlots((current) => current.map((item) => item.id === id ? { ...item, name } : item)); setFeedback(""); }}
-                onTimeChange={(id, time) => { if (saving || isReordering) return; setSlots((current) => current.map((item) => item.id === id ? { ...item, time } : item)); setFeedback(""); }} />)}
-            </AnimatePresence>
-          </Reorder.Group>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={startSlotReorder} onDragEnd={handleSlotDragEnd} onDragCancel={handleSlotDragCancel}
+            accessibility={{ announcements: dndAnnouncements, screenReaderInstructions: { draggable: "Use the Move Up and Move Down buttons to reorder this slot with a keyboard. Use a pointer to drag the handle." } }}>
+            <SortableContext items={visibleSlots.map((slot) => slot.id)} strategy={verticalListSortingStrategy}>
+              <div className="slot-list" id="slot-settings-list">
+                <AnimatePresence initial={false} onExitComplete={completeSlotRemovals}>
+                  {visibleSlots.map((slot, position) => <SlotSettingsRow key={slot.id} slot={slot} position={position} total={visibleSlots.length} saving={saving} disabled={saving || removingSlots.size > 0}
+                    onRemove={removeSlot} onReorderKey={moveByKeyboard}
+                    onNameChange={(id, name) => { if (saving || isReordering) return; setSlots((current) => current.map((item) => item.id === id ? { ...item, name } : item)); setFeedback(""); }}
+                    onTimeChange={(id, time) => { if (saving || isReordering) return; setSlots((current) => current.map((item) => item.id === id ? { ...item, time } : item)); setFeedback(""); }} />)}
+                </AnimatePresence>
+              </div>
+            </SortableContext>
+          </DndContext>
           <div className="settings-actions"><button type="button" id="add-slot" className="secondary-button" disabled={saving || removingSlots.size > 0 || slots.length >= 12} onClick={() => { if (saving || isReordering || removingSlots.size > 0) return; setSlots((current) => [...current, { id: uuid(), name: "", time: "" }]); setFeedback(""); }}>+ Add slot</button>
             <div className="settings-save-actions"><button type="button" id="revert-slot-changes" className="secondary-button" disabled={saving || !dirty} onClick={revert}>Revert</button>
               <button type="submit" className={`primary-button slot-save-button${saveState === "saved" ? " is-saved" : ""}${saveState === "error" ? " is-error" : ""}`} data-state={saveState} aria-label={saveState === "saving" ? "Saving" : saveState === "saved" ? "Saved" : saveState === "error" ? "Save failed" : "Save"} disabled={saving || removingSlots.size > 0 || !dirty || !valid}>
