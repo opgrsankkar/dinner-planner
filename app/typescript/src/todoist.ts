@@ -16,6 +16,11 @@ export interface TodoistTask extends TodoistRecord {
   readonly project_id?: TodoistIdentifier | null
 }
 
+export interface TodoistTaskUpdatePayload {
+  readonly due_datetime: string
+  readonly due_timezone: string
+}
+
 export class TodoistError extends Error {
   constructor(message: string) {
     super(message)
@@ -77,6 +82,23 @@ function dateParameter(value: string | Date): string {
   return value.toISOString()
 }
 
+function taskDueDateTime(value: string | Date): string {
+  if (value instanceof Date) {
+    if (!Number.isFinite(value.getTime())) throw new TodoistError('Todoist task due date and time is invalid')
+    return value.toISOString()
+  }
+  const isoDateTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/u
+  if (!isoDateTime.test(value) || !Number.isFinite(Date.parse(value))) {
+    throw new TodoistError('Todoist task due date and time is invalid')
+  }
+  return value
+}
+
+function hasNonEmptyTaskId(value: unknown): value is TodoistIdentifier {
+  if (typeof value === 'string') return value.trim().length > 0
+  return typeof value === 'number' && Number.isFinite(value) && value !== 0
+}
+
 export class TodoistClient {
   private readonly token: string
   private readonly fetchImplementation: TodoistFetch
@@ -118,6 +140,47 @@ export class TodoistClient {
     return tasks
       .map(asTask)
       .filter((task) => task.project_id !== undefined && task.project_id !== null && String(task.project_id) === String(projectId))
+  }
+
+  async createTask(
+    content: string,
+    projectId: TodoistIdentifier,
+    dueAt: string | Date,
+    timezone: string,
+    requestId: string,
+    description = '',
+  ): Promise<TodoistTask> {
+    const response = await this.write('tasks', 'POST', requestId, {
+      content,
+      project_id: projectId,
+      due_datetime: taskDueDateTime(dueAt),
+      due_timezone: timezone,
+      description,
+    })
+    if (!isRecord(response) || !hasNonEmptyTaskId(response.id)) {
+      throw new TodoistError('Todoist did not return the created task')
+    }
+    return response as TodoistTask
+  }
+
+  async updateTask(
+    taskId: TodoistIdentifier,
+    payload: TodoistTaskUpdatePayload,
+    requestId: string,
+  ): Promise<TodoistTask> {
+    const response = await this.write(`tasks/${encodedTaskIdentifier(taskId)}`, 'POST', requestId, {
+      due_datetime: taskDueDateTime(payload.due_datetime),
+      due_timezone: payload.due_timezone,
+    })
+    if (isRecord(response)) return asTask(response)
+
+    const task = await this.getTask(taskId)
+    if (!task) throw new TodoistError('Updated Todoist task could not be read back')
+    return task
+  }
+
+  async deleteTask(taskId: TodoistIdentifier, requestId: string): Promise<void> {
+    await this.write(`tasks/${encodedTaskIdentifier(taskId)}`, 'DELETE', requestId, undefined, true)
   }
 
   private async paginate(path: string, params: Record<string, string> = {}): Promise<TodoistRecord[]> {
@@ -162,6 +225,57 @@ export class TodoistClient {
     }
 
     if (response.status === 404 && notFoundIsNull) return null
+    if (!response.ok) throw new TodoistError(`Todoist request failed (HTTP ${response.status})`)
+    if (response.status === 204) return null
+
+    let body: string
+    try {
+      body = await response.text()
+    } catch {
+      throw new TodoistError('Todoist response could not be read')
+    }
+    if (body.length === 0) return null
+
+    try {
+      return JSON.parse(body) as unknown
+    } catch {
+      throw new TodoistError('Todoist returned invalid JSON')
+    }
+  }
+
+  private async write(
+    path: string,
+    method: 'POST' | 'DELETE',
+    requestId: string,
+    payload?: Record<string, unknown>,
+    notFoundIsSuccess = false,
+  ): Promise<unknown | null> {
+    if (typeof requestId !== 'string' || requestId.trim().length === 0) {
+      throw new TodoistError('Todoist write request ID is required')
+    }
+
+    const url = new URL(path, `${TODOIST_API_BASE_URL}/`)
+    const signal = AbortSignal.timeout(TODOIST_REQUEST_TIMEOUT_MS)
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.token}`,
+      Accept: 'application/json',
+      'X-Request-ID': requestId,
+    }
+    const init: RequestInit = { method, headers, signal }
+    if (payload !== undefined) {
+      headers['Content-Type'] = 'application/json'
+      init.body = JSON.stringify(payload)
+    }
+
+    let response: Response
+    try {
+      response = await this.fetchImplementation(url, init)
+    } catch {
+      if (signal.aborted) throw new TodoistError('Todoist request timed out; try again')
+      throw new TodoistError('Todoist could not be reached; try again')
+    }
+
+    if (notFoundIsSuccess && response.status === 404) return null
     if (!response.ok) throw new TodoistError(`Todoist request failed (HTTP ${response.status})`)
     if (response.status === 204) return null
 
