@@ -64,6 +64,16 @@ The wrapper requires an explicit `--db <path>`, applies `prisma db migrate` to t
 
 The contract gap is demonstrated by the temporary tests: after the custom index is dropped, Prisma ORM `8.0.0-rc.13` `prisma db verify --db <path>` still succeeds, while the custom verifier and migration wrapper fail. Raw Prisma migration or verification commands alone therefore do not establish migration readiness. The wrapper is the supported migration command and must succeed before a database is considered ready under this invariant.
 
+## Operational repositories
+
+The isolated TypeScript package now exposes typed repositories for generic `kv` settings, reusable `meal_library` entries, and configurable `meal_slots`. Create them with `createOperationalRepositories(absoluteDatabasePath)` from `src/operational-repositories.ts`. The path is required, must be absolute, and must already name a regular SQLite file; the factory does not read `DATABASE_PATH`, create an implicit database, or choose a production location. The caller owns the returned lifecycle and must await `close()`. Closing is idempotent, waits for operations already in flight, and releases the Prisma SQLite runtime connection; use a new factory for a new connection.
+
+The repositories use the typed Prisma ORM 8 SQLite runtime and its transaction API for settings updates, library mutations, shuffling, and complete slot saves. A few meal-library reads use minimal parameterized Prisma raw SQL because the generated contract cannot express the legacy custom `COLLATE NOCASE` index in equality or ordering. Those statements preserve SQLite's ASCII-only case folding; all user values are bound through tagged-template parameters. No schema or migration changes are required.
+
+Settings retain generic key/value access. `theme_mode` reads as `system` when absent or invalid and accepts only `system`, `light`, or `dark` through its dedicated setter. Library names collapse whitespace on add, duplicate names reuse the existing row under SQLite NOCASE rules, new rows append after the maximum position, and shuffle updates contiguous positions atomically. Slot reads return active rows ordered by position and ID and fail closed if aliases are not a JSON string array. Slot saves atomically deactivate omitted rows, upsert the supplied order with contiguous positions, and append the prior time to aliases once when a slot time changes while preserving previous aliases and their order.
+
+This phase does not wire repositories into routes or the server. It does not read or write Todoist, change the cache, tombstones, or outbox, or add local planned-meal authority. Repository tests create fresh OS temporary directories, migrate only synthetic databases through the supported `prisma:migrate -- --db <absolute-temp-path>` wrapper, force a transactional rollback, and close every repository and test connection before cleanup. They never open deployment data.
+
 ## Separate importer preflight
 
 SQLite permits null values in legacy non-integer `TEXT PRIMARY KEY` columns despite their primary-key declarations. Prisma `@id` emits `NOT NULL`; the importer separately detects and rejects null source keys before beginning its transaction. This is an importer check, not part of the meal-library invariant verifier. Imported values are copied as stored and are not normalized. Any production-data audit must independently verify the null-key precondition before migration.
@@ -80,8 +90,9 @@ Production migration remains gated on a verified backup of the exact production 
 2. **Operational-state migration proof:** model legacy operational data and test a synthetic copy migration with an explicit custom check for the raw SQLite collation invariant and production backup/rollback gates. This phase does not qualify production data.
 3. **TypeScript authentication/security:** port the existing password, signed-session, host validation, CSRF, rate-limit, and response-header foundation into the isolated TypeScript app.
 4. **Read-only Todoist client:** explicit token injection, GET-only typed reads, and offline fake-transport tests without application routes or data writes.
-5. **Read integration:** connect the client to authenticated planner data loading and display while preserving Todoist as the planned-meal authority; keep cache and mutation choices in separate phases.
-6. **Production runtime cutover:** a separate future phase after the production-data audit, backup, restore, and operational-readiness gates are resolved.
+5. **Operational repositories:** typed settings, reusable meal-library, and meal-slot access with explicit database paths, safe lifecycle handling, and synthetic temporary-database tests. No route or server wiring is included.
+6. **Read integration:** connect the client to authenticated planner data loading and display while preserving Todoist as the planned-meal authority; keep cache and mutation choices in separate phases.
+7. **Production runtime cutover:** a separate future phase after the production-data audit, backup, restore, and operational-readiness gates are resolved.
 
 ## Official setup references
 
