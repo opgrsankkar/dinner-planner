@@ -68,12 +68,25 @@ async function startup(db: string, expectedMeal?: string) {
 try {
   // Reproduce the old failure without relying on root build success.
   const negativeDb = join(directory, "negative.sqlite");
+  const appRootMigrations = resolve("prisma");
   const negative = cli(["node_modules/prisma/dist/prisma.js", "db", "init"], {
     DATABASE_PATH: negativeDb, PLANNER_DB: negativeDb,
-    PRISMA_MIGRATIONS_DIR: resolve("migrations"),
+    PRISMA_MIGRATIONS_DIR: appRootMigrations,
   });
+  assert.equal(negative.signal, null, "Negative CLI must exit normally");
+  assert.notEqual(negative.status, null, "Negative CLI must report an exit status");
   assert.notEqual(negative.status, 0, "App-root migration refs must fail read-only");
-  assert.match(negative.stdout + negative.stderr, /EACCES|EROFS/);
+  // Prisma can report ENOENT for mkdir on a read-only overlay; the direct write probe above proves permissions.
+  const negativeResult = (negative.stdout + "\n" + negative.stderr).split("\n")
+    .filter((line) => line.trimStart().startsWith("{"))
+    .map((line) => JSON.parse(line))
+    .find((event) => event.kind === "result");
+  assert.ok(negativeResult, "Negative CLI must emit a structured result");
+  assert.equal(negativeResult.envelope.commandId, "db.init");
+  assert.equal(negativeResult.envelope.ok, false);
+  assert.equal(typeof negativeResult.envelope.error?.why, "string");
+  assert.ok(negativeResult.envelope.error.why.includes(`${appRootMigrations}/`),
+    "Negative CLI failure must mention the forced app-root migrations path");
   const fresh = join(directory, "fresh.sqlite");
   await startup(fresh);
   assert.ok(existsSync(`${fresh}.prisma/app/refs/db.json`));
