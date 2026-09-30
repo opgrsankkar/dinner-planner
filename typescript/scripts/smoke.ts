@@ -213,17 +213,59 @@ try {
       .count(),
     1,
   );
-  await page
-    .getByRole("button", { name: "Theme: system. Change theme", exact: true })
-    .click();
-  await page
-    .getByRole("button", { name: "Theme: light. Change theme", exact: true })
-    .click();
-  await page.reload();
-  await page
-    .getByRole("button", { name: "Theme: dark. Change theme", exact: true })
-    .waitFor();
-  assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
+  for (const preference of ["light", "dark"] as const) {
+    await page.getByRole("link", { name: "Settings", exact: true }).click();
+    await page.getByRole("radio", { name: /System/ }).click();
+    await page.waitForFunction(() => !!document.querySelector<HTMLInputElement>('.theme-option input')?.checked);
+    await page.waitForFunction(() => document.documentElement.dataset.theme ===
+      (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
+    await page.getByRole("link", { name: "← Back to plan", exact: true }).click();
+    await page.emulateMedia({ colorScheme: preference });
+    await page.reload();
+    const opposite = preference === "dark" ? "light" : "dark";
+    const toggle = page.getByRole("button", { name: `Switch to ${opposite} theme`, exact: true });
+    await toggle.waitFor();
+    assert.equal(await page.locator("html").getAttribute("data-theme"), preference);
+    assert.ok(await toggle.locator("svg").isVisible());
+    const iconHref = await toggle.locator("use").getAttribute("href");
+    assert.equal(iconHref, `/static/lucide-icons.svg#${preference === "dark" ? "moon" : "sun"}`);
+    const sprite = await (await context.request.get("http://127.0.0.1:3100/static/lucide-icons.svg")).text();
+    assert.ok(await page.evaluate(({ sprite, id }) => {
+      const document = new DOMParser().parseFromString(sprite, "image/svg+xml");
+      return !!document.getElementById(id)?.querySelector("path,circle,line,polyline");
+    }, { sprite, id: preference === "dark" ? "moon" : "sun" }), "Theme icon references a populated sprite symbol");
+    await toggle.click();
+    await page.getByRole("button", { name: `Switch to ${preference} theme`, exact: true }).waitFor();
+    await page.reload();
+    await page.getByRole("button", { name: `Switch to ${preference} theme`, exact: true }).waitFor();
+    assert.equal(await page.locator("html").getAttribute("data-theme"), opposite);
+    const snapshot = await (await context.request.get("http://127.0.0.1:3100/api/board")).json();
+    assert.equal(snapshot.settings.theme, opposite);
+  }
+  const longName = "Long synthetic meal with vegetables lentils rice and accompaniments " + "x".repeat(50);
+  await page.getByRole("searchbox").fill(longName);
+  await page.getByRole("button", { name: "Add meal", exact: true }).click();
+  await page.getByRole("searchbox").fill("");
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.locator(".library-chip-name").filter({ hasText: longName }).waitFor();
+    await page.waitForTimeout(500);
+    assert.ok(await page.locator(".library-list").evaluate((list) => {
+      const chips = [...list.querySelectorAll<HTMLElement>(".library-chip")];
+      return chips.every((chip) => {
+        const box = chip.getBoundingClientRect();
+        const name = chip.querySelector<HTMLElement>(".library-chip-name")!;
+        const text = name.getBoundingClientRect();
+        return text.top >= box.top && text.bottom <= box.bottom && name.scrollWidth <= name.clientWidth + 1 &&
+          chips.every((other) => {
+            if (other === chip) return true;
+            const next = other.getBoundingClientRect();
+            return box.right <= next.left || next.right <= box.left || box.bottom <= next.top || next.bottom <= box.top;
+          });
+      });
+    }), "Long names stay within chips without overlapping rows");
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole("button", { name: "Next week", exact: true }).click();
   assert.equal(await page.locator(".meal-chip").count(), 0);
   await page
@@ -288,6 +330,8 @@ try {
     await page.getByRole("button", { name: "Save", exact: true }).isDisabled(),
     true,
   );
+  assert.equal(await page.getByRole("navigation", { name: "Week navigation" }).count(), 0);
+  await page.getByRole("link", { name: "← Back to plan", exact: true }).waitFor();
   await page.getByLabel("Slot label 1", { exact: true }).fill("Morning");
   await page.waitForTimeout(700); // Board polling must not discard this draft.
   assert.equal(
@@ -381,7 +425,7 @@ try {
       exact: true,
     })
     .waitFor({ state: "detached" });
-  await page.getByRole("link", { name: "Planner", exact: true }).click();
+  await page.getByRole("link", { name: "← Back to plan", exact: true }).click();
   await page
     .locator(".meal-chip")
     .filter({ hasText: "Vegetable pasta" })

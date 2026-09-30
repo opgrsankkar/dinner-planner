@@ -59,3 +59,53 @@ It opens the source read-only, checks integrity/schema and refuses unresolved pe
 Import preserves library UUIDs/order and rejects case-insensitive duplicate names. Human-readable legacy slot IDs map deterministically to UUIDs; the full original slot IDs/order/aliases/inactive state and KV settings are retained in settings import metadata. Active slots and unambiguous aliases are applied to the new planner. Theme is preserved. A staged database transaction is closed/checkpointed and published exclusively; failure leaves no target, and rerun refuses an existing target. Tests prove byte-identical source, rollback, refusal and rerun behavior. Legacy library IDs outside the existing UUIDv4 convention require repair on a separate backup copy and are explicitly refused.
 
 Cutover sequence: drain old actions and reconcile tombstones; retain old artifact/config and backup; stop the old mutation worker; take the final consistent backup; import into the new path; set `DATABASE_PATH`; start the new container; verify health, login, library/settings and actual scoped Todoist writes with Hermes. Never run old and new workers simultaneously. To roll back, stop the new worker and restore old artifact/config/database path. Reconcile any writes performed since cutover in Todoist before replaying old pending state. Backup files and originals remain untouched by the CLI.
+
+## Nonroot, read-only runtime acceptance (Hermes)
+
+Prisma `db init` writes migration refs and snapshots. `prisma.config.ts` places these in `<absolute DATABASE_PATH>.prisma` (also honoring `PLANNER_DB`), alongside the writable database, rather than `/srv/app/typescript/migrations`. A distinct database gets a distinct workspace. Import initializes inside its existing temporary staging directory, so its workspace is removed with staging; an imported database starts without initialization. Contract source and generated `src/prisma` artifacts remain read-only. `PRISMA_MIGRATIONS_DIR` can override the workspace with an explicitly writable absolute directory; leave it unset normally. Contract emission remains a build/development operation. Telemetry is disabled with `PRISMA_DISABLE_TELEMETRY=1`.
+
+The final image includes the synthetic tests as well as init/import tooling. Run these commands without deployment secrets, live data, or the production Compose env file:
+
+```sh
+docker build -t dinner-planner:verify .
+# Overrides the image UID just as Compose does; only tmpfs data/scratch are writable.
+docker run --rm --read-only --user "$(id -u):$(id -g)" \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --tmpfs /data:rw,mode=1777,size=128m --tmpfs /tmp:rw,mode=1777,size=128m \
+  -e TMPDIR=/data -e PRISMA_DISABLE_TELEMETRY=1 \
+  dinner-planner:verify npm test
+docker run --rm --read-only --user "$(id -u):$(id -g)" \
+  --cap-drop ALL --security-opt no-new-privileges \
+  --tmpfs /data:rw,mode=1777,size=128m --tmpfs /tmp:rw,mode=1777,size=128m \
+  -e TMPDIR=/data -e PRISMA_DISABLE_TELEMETRY=1 \
+  dinner-planner:verify npm run check:runtime
+```
+
+`check:runtime` requires a nonroot UID and proves the app directory rejects writes. Its negative check directs refs to the read-only app directory and requires an EACCES/EROFS error. It then checks fresh production startup, authenticated fake-provider board reads, restart of that database, the actual import CLI with a synthetic legacy backup, and startup of the imported database. All fixtures and workspaces are cleaned up. No browser or real Todoist is required. The 32-test suite separately covers import rollback/refusal, source preservation, and additive initialization of an existing database.
+
+For local Linux permission reproduction without Docker, use a fresh scratch directory with Bubblewrap (run from repository root):
+
+```sh
+runtime_scratch=$(mktemp -d /tmp/planner-readonly.XXXXXX)
+bwrap --ro-bind / / --bind "$runtime_scratch" "$runtime_scratch" \
+  --setenv TMPDIR "$runtime_scratch" --setenv PRISMA_DISABLE_TELEMETRY 1 \
+  --chdir "$PWD/typescript" npm run check:runtime
+# Repeat with npm test in place of npm run check:runtime.
+```
+
+The caller must be nonroot and use Node 26. If the agent sandbox denies piped subprocesses or loopback listeners, run these acceptance commands on Hermes's Docker-enabled host; that restriction is distinct from application filesystem permissions.
+
+The initializer can also be reproduced directly when piped child processes are denied (same `runtime_scratch`, repository root):
+
+```sh
+bwrap --ro-bind / / --bind "$runtime_scratch" "$runtime_scratch" \
+  --setenv TMPDIR "$runtime_scratch" --setenv DATABASE_PATH "$runtime_scratch/fresh.sqlite" \
+  --setenv PRISMA_DISABLE_TELEMETRY 1 --chdir "$PWD/typescript" \
+  node node_modules/prisma/dist/prisma.js db init
+# Negative control: must fail with EROFS opening app migration refs.
+bwrap --ro-bind / / --bind "$runtime_scratch" "$runtime_scratch" \
+  --setenv TMPDIR "$runtime_scratch" --setenv DATABASE_PATH "$runtime_scratch/negative.sqlite" \
+  --setenv PRISMA_MIGRATIONS_DIR "$PWD/typescript/migrations" \
+  --setenv PRISMA_DISABLE_TELEMETRY 1 --chdir "$PWD/typescript" \
+  node node_modules/prisma/dist/prisma.js db init
+```

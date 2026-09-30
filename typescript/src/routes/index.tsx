@@ -55,6 +55,7 @@ export function Planner() {
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [theme, setTheme] = useState("system");
+  const [effectiveTheme, setEffectiveTheme] = useState("light");
   const dialog = useRef<HTMLDialogElement>(null);
   const deleteDialog = useRef<HTMLDialogElement>(null);
   const [deleteTarget, setDeleteTarget] = useState<Card | null>(null);
@@ -123,8 +124,9 @@ export function Planner() {
   useEffect(() => {
     const media = matchMedia("(prefers-color-scheme: dark)");
     const apply = () => {
-      document.documentElement.dataset.theme =
-        theme === "system" ? (media.matches ? "dark" : "light") : theme;
+      const resolved = theme === "system" ? (media.matches ? "dark" : "light") : theme;
+      document.documentElement.dataset.theme = resolved;
+      setEffectiveTheme(resolved);
     };
     apply();
     media.addEventListener("change", apply);
@@ -335,60 +337,51 @@ export function Planner() {
           <span className="brand-mark">✦</span>
           <span>Meal Planner</span>
         </a>
-        <nav className="week-nav" aria-label="Week navigation">
-          <button
-            className="icon-button"
-            aria-label="Previous week"
-            onClick={() => navigate(-7)}
-          >
-            ‹
-          </button>
-          <span className="week-title">
-            {days[0].label} – {days[6].label}
-          </span>
-          <button
-            className="icon-button"
-            aria-label="Next week"
-            onClick={() => navigate(7)}
-          >
-            ›
-          </button>
-        </nav>
+        {settingsPage ? (
+          <a className="this-week" href="/">← Back to plan</a>
+        ) : (
+          <nav className="week-nav" aria-label="Week navigation">
+            <button
+              className="icon-button"
+              aria-label="Previous week"
+              onClick={() => navigate(-7)}
+            >
+              ‹
+            </button>
+            <span className="week-title">
+              {days[0].label} – {days[6].label}
+            </span>
+            <button
+              className="icon-button"
+              aria-label="Next week"
+              onClick={() => navigate(7)}
+            >
+              ›
+            </button>
+          </nav>
+        )}
         <div className="top-actions">
-          <a
+          {!settingsPage && <a
             className="icon-button settings-link"
-            href={settingsPage ? "/" : "/settings"}
-            aria-label={settingsPage ? "Planner" : "Settings"}
+            href="/settings"
+            aria-label="Settings"
           >
-            <Icon name={settingsPage ? "calendar" : "settings"} />
-          </a>
-          <button className="this-week" onClick={() => setWeek(monday())}>
+            <Icon name="settings" />
+          </a>}
+          {!settingsPage && <button className="this-week" onClick={() => setWeek(monday())}>
             This week
-          </button>
+          </button>}
           <button
             className="icon-button theme-toggle"
-            aria-label={`Theme: ${theme}. Change theme`}
+            aria-label={`Switch to ${effectiveTheme === "dark" ? "light" : "dark"} theme`}
             onClick={() => {
-              const value =
-                theme === "system"
-                  ? "light"
-                  : theme === "light"
-                    ? "dark"
-                    : "system";
+              const value = effectiveTheme === "dark" ? "light" : "dark";
               void post("/api/settings/theme", { theme: value })
                 .then(refresh)
                 .catch((e) => setError(e.message));
             }}
           >
-            <Icon
-              name={
-                theme === "dark"
-                  ? "moon"
-                  : theme === "light"
-                    ? "sun"
-                    : "monitor"
-              }
-            />
+            <Icon name={effectiveTheme === "dark" ? "moon" : "sun"} />
           </button>
           <button
             className="text-button"

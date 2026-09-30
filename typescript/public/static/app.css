@@ -18,3 +18,5 @@
 @media(max-width:560px){.slot-edit-row{grid-template-columns:28px minmax(0,1fr) 72px 34px}.slot-order-controls{grid-column:1;grid-row:1;align-self:center;justify-self:center;width:28px}body.keyboard-navigation .slot-edit-row,.slot-edit-row.reorder-actions-open{grid-template-columns:52px minmax(0,1fr) 72px 34px}body.keyboard-navigation .slot-order-controls,.slot-edit-row.reorder-actions-open .slot-order-controls{width:52px}}
 .card-action{border:0;background:transparent;color:var(--muted);padding:0 2px;cursor:pointer;font-size:12px}.slot-edit-grip{border:0;background:transparent;color:var(--muted);padding:0}
 @media(max-width:560px){body.keyboard-navigation .slot-edit-row,.slot-edit-row.reorder-actions-open{grid-template-columns:52px minmax(0,1fr) 72px 34px}}
+
+.library-list{grid-auto-rows:minmax(min-content,auto);flex-shrink:0}.library-chip{height:auto;min-height:37px}.library-chip-name{white-space:normal;overflow-wrap:anywhere}.library-plan-trigger{flex-shrink:0}

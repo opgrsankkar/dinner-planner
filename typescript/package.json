@@ -9,10 +9,11 @@
     "dev": "vite --host 127.0.0.1 --port 3000",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "node --import tsx --test tests/*.test.ts",
     "contract": "prisma contract emit",
     "db:init": "prisma db init",
     "smoke": "tsx scripts/smoke.ts",
+    "check:runtime": "node --import tsx scripts/runtime-check.ts",
     "demo": "mkdir -p .local && npm run db:init && npm run dev",
     "start": "node scripts/serve.mjs",
     "import:legacy": "tsx scripts/import-legacy.ts"
