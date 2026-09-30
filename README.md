@@ -28,29 +28,21 @@ To use a direct token, set `TODOIST_TOKEN=...` in `.env`; it takes precedence ov
 - Drag a library meal into a dated slot to create a distinct Todoist task. Drag an active planned item to another cell to update its due date/time. Drag a planned item over the library to reveal the delete target; deletion is confirmed and removes the Todoist task. Plan edits are recorded transactionally in SQLite and pushed one-way by a background worker; tiny per-meal spinner/check indicators show progress, without a page reload or global syncing banner.
 - Add library names via the library search field and Add meal; Shuffle randomizes the persistent library order. Remove reusable entries from Settings → Manage meal library; this does not delete existing Todoist placements.
 - Appearance starts in `system` mode. The plan-page toggle switches to the opposite of the current effective system/light/dark theme; Settings offers System, Light, and Dark so you can reset to system.
-- Completed task history is read from Todoist where available. SQLite keeps only a seven-day active-task ownership cache and short-lived optimistic overlays/outbox receipts—not a separate permanent plan history. Undated tasks are not displayed.
+- Completed task history is read from Todoist where available. SQLite keeps durable outbox receipts; bounded temporary snapshots and optimistic overlays are reconciled with Todoist—not a separate permanent plan history. Undated and invalid-time tasks are reported as warnings.
 - Slot-time edits migrate active Meals tasks from the old preset time to the new one. The setting remains classifiable if a Todoist write is temporarily incomplete; the error is shown and a retry can finish the migration.
 - A missing/ambiguous Meals project, API error, missing due time, or unknown preset never silently becomes a local plan. The board displays integration errors or a warning.
 
 ## Security and storage
 
-- Single shared password, signed HttpOnly/Secure/SameSite session, throttled login, CSRF checks, trusted-host validation, security headers, and server-only Todoist token.
+- Single shared password, server-side opaque HttpOnly/Secure/SameSite session, throttled login, CSRF checks, trusted-host validation, security headers, and server-only Todoist token.
 - The web process runs non-root using the host UID/GID from `.env` so it can read a mode-0600 token file and write private bind-mounted data. It drops Linux capabilities and binds only to `172.17.0.1:8789` for Caddy.
 - SQLite lives at `DATABASE_PATH` (default `/data/meals.sqlite3`); `/data` is the persistent host bind mount. Unsent actions survive app/container restarts, retry with backoff, and expose a small per-meal retry control after repeated failure. A successful Todoist DELETE response is treated as the acknowledgement; the app does not immediately GET the deleted task, avoiding false “still exists” errors from stale reads.
 - Local Lucide SVG icons are served from the app itself; no third-party icon CDN or runtime font dependency is needed.
 - Copy `.env.example` to `.env` only for a fresh manual deployment. Never commit `.env`, `secrets/`, or `data/`.
 
-## Frontend
+## TypeScript application
 
-The authenticated board and Settings UI are rendered by a bundled React 19 app; FastAPI continues to own authentication, HTML boot data, and the existing JSON APIs. The server-rendered login page remains unchanged. Docker builds the local bundle with esbuild so production requires no frontend CDN.
-
-For local frontend work:
-
-```bash
-cd app/frontend
-npm ci
-npm run build
-```
+The root container now builds and hosts TanStack Start/React with Node 26 and Prisma ORM 8 SQLite. See [implementation, verification and cutover instructions](typescript/README.md). The Python source remains only as a behavior/data reference and rollback artifact; never point the new runtime at the old Python database. Import an explicit backup into a distinct target and set `DATABASE_PATH` to it.
 
 ## Local checks
 

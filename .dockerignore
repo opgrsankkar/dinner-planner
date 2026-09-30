@@ -1,7 +1,10 @@
 .git
 .env
-data/
-secrets/
-.pytest_cache/
-**/__pycache__/
-app/frontend/node_modules/
+secrets
+data
+app
+node_modules
+typescript/node_modules
+typescript/.local
+typescript/dist
+.hermes
