@@ -12,6 +12,7 @@ import type {
   Slot,
 } from "../types";
 import type { Todoist } from "./todoist";
+import { TodoistError } from "./todoist-api";
 type Id = DefaultModelRow<Contract, "Outbox">["id"];
 const id = (value: string) => value as Id;
 export const uuidPattern =
@@ -29,7 +30,7 @@ export class Store {
     this.writing = result.catch(() => {});
     return result;
   }
-  async seed() {
+  async seed(demo = true) {
     await this.write(() =>
       this.db.transaction(async (tx) => {
         if (await tx.orm.Setting.where({ id: settingsId }).first()) return;
@@ -38,11 +39,12 @@ export class Store {
             ["Breakfast", "08:00"],
             ["Lunch", "13:00"],
             ["Dinner", "19:00"],
+            ...(!demo ? [["School snack", "16:00"]] : []),
           ]) {
             await tx.orm.Slot.create({ id: id(randomUUID()), name, time });
           }
         }
-        if (!(await tx.orm.Library.first()))
+        if (demo && !(await tx.orm.Library.first()))
           for (const name of ["Idli & sambar", "Dal & rice", "Vegetable pasta"])
             await tx.orm.Library.create({ id: id(randomUUID()), name });
         await tx.orm.Setting.create({
@@ -59,7 +61,7 @@ export class Store {
     );
   }
   async addLibrary(name: string) {
-    name = name.trim();
+    name = name.trim().replace(/\s+/g, " ");
     if (!name || name.length > 120)
       throw new Error("Use a meal name between 1 and 120 characters");
     return this.write(() =>
@@ -131,11 +133,33 @@ export class Store {
       }),
     );
   }
-  async board(todoist: Todoist): Promise<Omit<Board, "csrf">> {
-    const project = await todoist.mealsProject();
-    if (project.name !== "Meals")
-      throw new Error("Configured project is not Meals");
-    const remote = await todoist.list(project.id);
+  private lastProject = "";
+  private observed = new Set<string>();
+  private snapshots = new Map<string, import("../types").RemoteMeal[]>();
+  async board(todoist: Todoist, week?: string): Promise<Omit<Board, "csrf">> {
+    let project = { id: this.lastProject, name: "Meals" };
+    let remote = this.snapshots.get(week ?? "active") ?? [];
+    let integrationError = "";
+    try {
+      project = await todoist.mealsProject();
+      if (project.name !== "Meals")
+        throw new Error("Configured project is not Meals");
+      this.lastProject = project.id;
+      remote = await todoist.list(project.id, { week });
+      this.snapshots.set(week ?? "active", remote);
+      while (this.snapshots.size > 8)
+        this.snapshots.delete(this.snapshots.keys().next().value!);
+    } catch (error) {
+      integrationError =
+        error instanceof Error ? error.message : "Todoist unavailable";
+    }
+    if (!project.id) {
+      const pending = (await this.db.orm.Outbox.all()).find(
+        (row) => row.state === "pending",
+      );
+      if (pending)
+        project.id = (JSON.parse(pending.payload) as Mutation).projectId;
+    }
     return this.write(async () => {
       const settings = await this.settings();
       const operations = (await this.db.orm.Outbox.all()).filter(
@@ -149,7 +173,8 @@ export class Store {
               (row) =>
                 row.state === "saved" &&
                 (JSON.parse(row.payload) as Mutation).kind === "delete" &&
-                row.remoteId === task.id,
+                row.remoteId === task.id &&
+                Date.now() - Number(row.confirmedAt) < 120000,
             ),
         )
         .map((task) => {
@@ -185,15 +210,46 @@ export class Store {
           confirmedAt: 0,
         });
       }
-      settings.aliases = Object.fromEntries(
-        Object.entries(settings.aliases).filter(([, slotId]) =>
+      // Acknowledged writes may precede eventually consistent listings. Retain a
+      // short overlay, then reconcile external edits/deletions from Todoist.
+      const latest = new Map<string, (typeof operations)[number]>();
+      for (const op of operations
+        .filter((row) => row.state === "saved")
+        .sort((a, b) => Number(a.confirmedAt) - Number(b.confirmedAt)))
+        latest.set(op.remoteId, op);
+      for (const op of latest.values()) {
+        const payload: Mutation = JSON.parse(op.payload);
+        if (
+          payload.kind === "delete" ||
+          this.observed.has(op.id) ||
+          Date.now() - Number(op.confirmedAt) >= 120000 ||
           operations.some(
             (row) =>
               row.state === "pending" &&
-              (JSON.parse(row.payload) as Mutation).slotId === slotId,
-          ),
-        ),
-      );
+              (JSON.parse(row.payload) as Mutation).taskId === op.remoteId,
+          )
+        )
+          continue;
+        const index = cards.findIndex((card) => card.id === op.remoteId);
+        if (
+          index >= 0 &&
+          (cards[index].completed ||
+            (cards[index].date === payload.date &&
+              cards[index].time === payload.time))
+        ) {
+          this.observed.add(op.id);
+          continue;
+        }
+        if (index >= 0) cards.splice(index, 1);
+        cards.push({
+          ...payload,
+          id: op.remoteId,
+          requestId: op.id,
+          state: "saved",
+          error: "",
+          confirmedAt: Number(op.confirmedAt),
+        });
+      }
       const slots = await this.db.orm.Slot.all();
       for (const card of cards)
         card.slotId =
@@ -207,6 +263,7 @@ export class Store {
         });
       return {
         settings,
+        integrationError,
         projectId: project.id,
         receivedRequests: operations
           .filter(
@@ -318,7 +375,10 @@ export class Store {
       const task = (await todoist.list(project.id)).find(
         (task) => task.id === input.taskId && task.projectId === project.id,
       );
-      if (!task) throw new Error("Meal does not belong to Meals");
+      if (!task || task.completed)
+        throw new Error(
+          "Meal is missing, completed, or does not belong to Meals",
+        );
       const slot = await this.db.orm.Slot.where({
         id: id(input.slotId ?? ""),
       }).first();
@@ -392,16 +452,39 @@ export class Store {
       const operations = await this.db.orm.Outbox.all();
       if (operations.some((row) => row.state === "pending"))
         throw new Error("Wait for pending meals before changing slots");
-      const remote = await todoist.list(project.id);
-      const aliases: Record<string, string> = {};
+      const remote = await todoist.list(project.id, { fresh: true });
+      for (const removed of old.filter(
+        (slot) => !slots.some((next) => next.id === slot.id),
+      )) {
+        const times = [
+          removed.time,
+          ...Object.entries(settings.aliases)
+            .filter(([, id]) => id === removed.id)
+            .map(([time]) => time),
+        ];
+        if (remote.some((task) => !task.completed && times.includes(task.time)))
+          throw new Error(
+            `Move or complete active ${removed.name} meals before removing this slot`,
+          );
+      }
+      const aliases: Record<string, string> = Object.fromEntries(
+        Object.entries(settings.aliases).filter(([, id]) =>
+          slots.some((slot) => slot.id === id),
+        ),
+      );
       await this.db.transaction(async (tx) => {
         for (const slot of slots) {
           const previous = old.find((item) => item.id === slot.id);
-          if (previous && previous.time !== slot.time) {
-            aliases[previous.time] = slot.id;
+          if (previous) {
+            if (previous.time !== slot.time) aliases[previous.time] = slot.id;
             for (const task of remote.filter(
               (task) =>
-                task.projectId === project.id && task.time === previous.time,
+                task.projectId === project.id &&
+                !task.completed &&
+                validDate(task.date) &&
+                task.time !== slot.time &&
+                (old.find((item) => item.time === task.time)?.id ??
+                  settings.aliases[task.time]) === slot.id,
             )) {
               await tx.orm.Outbox.create({
                 id: id(randomUUID()),
@@ -538,10 +621,12 @@ export class Worker {
             task.id !== payload.taskId ||
             task.projectId !== project.id ||
             task.date !== payload.date ||
-            task.time !== payload.time ||
-            task.name !== payload.name
+            task.time !== payload.time
           )
-            throw new Error("Todoist acknowledgement did not match move");
+            throw new TodoistError(
+              "Todoist acknowledgement did not match move",
+              true,
+            );
         }
         await this.store.write(() =>
           this.store.db.orm.Outbox.where({ id: action.id }).update({
@@ -553,11 +638,40 @@ export class Worker {
         );
         return;
       }
-      const matches = (await this.todoist.list(project.id)).filter(
-        (task) => task.requestId === action.id,
-      );
+      const known =
+        action.remoteId && this.todoist.get
+          ? await this.todoist.get(action.remoteId, project.id)
+          : null;
+      let matches = known
+        ? [known]
+        : (await this.todoist.list(project.id, { fresh: true })).filter(
+            (task) => task.requestId === action.id,
+          );
+      if (
+        !matches.length &&
+        Number(action.attempted) > 0 &&
+        !this.todoist.allowCreateReplay
+      )
+        matches = (
+          await this.todoist.list(project.id, {
+            week: payload.date,
+            fresh: true,
+          })
+        ).filter((task) => task.requestId === action.id);
       if (matches.length > 1)
-        throw new Error("Duplicate placement markers require inspection");
+        throw new TodoistError(
+          "Duplicate placement markers require inspection",
+          true,
+        );
+      if (
+        !matches[0] &&
+        Number(action.attempted) > 0 &&
+        !this.todoist.allowCreateReplay
+      )
+        throw new TodoistError(
+          "Create result uncertain; marker not visible yet. Inspect Meals before abandoning this request; no duplicate will be created.",
+          true,
+        );
       await this.store.write(() =>
         this.store.db.orm.Outbox.where({ id: action.id }).update({
           attempted: String(Number(action.attempted) + 1),
@@ -566,6 +680,11 @@ export class Worker {
       // Injectable providers must implement request-id idempotency. Same ID on every retry.
       const task =
         matches[0] ?? (await this.todoist.create(payload, action.id));
+      await this.store.write(() =>
+        this.store.db.orm.Outbox.where({ id: action.id }).update({
+          remoteId: task.id,
+        }),
+      );
       if (
         task.projectId !== project.id ||
         task.requestId !== action.id ||
@@ -573,7 +692,10 @@ export class Worker {
         task.date !== payload.date ||
         task.time !== payload.time
       )
-        throw new Error("Todoist acknowledgement did not match placement");
+        throw new TodoistError(
+          "Todoist acknowledgement did not match placement",
+          true,
+        );
       await this.store.write(() =>
         this.store.db.orm.Outbox.where({ id: action.id }).update({
           state: "saved",
@@ -583,12 +705,15 @@ export class Worker {
         }),
       );
     } catch (error) {
-      const delay = Math.min(
-        30000,
-        500 * 2 ** Math.min(Number(action.attempted), 6),
+      const delay = Math.max(
+        error instanceof TodoistError ? error.retryAfterMs : 0,
+        Math.min(30000, 500 * 2 ** Math.min(Number(action.attempted), 6)),
       );
       await this.store.write(() =>
         this.store.db.orm.Outbox.where({ id: action.id }).update({
+          ...(!payload.kind && error instanceof TodoistError && !error.uncertain
+            ? { attempted: action.attempted }
+            : {}),
           error: error instanceof Error ? error.message : "Sync failed",
           nextAt: String(Date.now() + delay),
         }),

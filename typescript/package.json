@@ -13,7 +13,9 @@
     "contract": "prisma contract emit",
     "db:init": "prisma db init",
     "smoke": "tsx scripts/smoke.ts",
-    "demo": "mkdir -p .local && npm run db:init && npm run dev"
+    "demo": "mkdir -p .local && npm run db:init && npm run dev",
+    "start": "node scripts/serve.mjs",
+    "import:legacy": "tsx scripts/import-legacy.ts"
   },
   "dependencies": {
     "@prisma/orm-sqlite": "8.0.0-rc.14",

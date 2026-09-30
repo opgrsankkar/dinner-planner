@@ -20,8 +20,15 @@ class ApiError extends Error {
   }
 }
 const iso = (date: Date) => date.toISOString().slice(0, 10);
+const today = () =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 function monday() {
-  const day = new Date();
+  const day = new Date(today() + "T12:00:00Z");
   day.setUTCHours(12, 0, 0, 0);
   day.setUTCDate(day.getUTCDate() - ((day.getUTCDay() + 6) % 7));
   return iso(day);
@@ -49,6 +56,8 @@ export function Planner() {
   const [now, setNow] = useState(Date.now());
   const [theme, setTheme] = useState("system");
   const dialog = useRef<HTMLDialogElement>(null);
+  const deleteDialog = useRef<HTMLDialogElement>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Card | null>(null);
   const local = useRef(new Map<string, Card>());
   const intents = useRef(new Map<string, Intent>());
   function persistIntents() {
@@ -64,7 +73,7 @@ export function Planner() {
   }
   const csrf = board?.csrf ?? "";
   const refresh = useCallback(async () => {
-    const response = await fetch("/api/board");
+    const response = await fetch(`/api/board?week=${week}`);
     if (response.status === 401) {
       setSignedOut(true);
       setBoard(null);
@@ -86,7 +95,7 @@ export function Planner() {
     setBoard(next);
     setSignedOut(false);
     setNow(Date.now());
-  }, []);
+  }, [week]);
   useEffect(() => {
     try {
       const saved = JSON.parse(
@@ -206,6 +215,7 @@ export function Planner() {
     date = card.date,
     slot?: Slot,
   ) {
+    if (card.completed) return;
     const requestId = crypto.randomUUID();
     const pending: Card = {
       ...card,
@@ -412,6 +422,35 @@ export function Planner() {
                 </button>
               </p>
             )}
+            {board.integrationError && (
+              <p className="error-banner" role="alert">
+                {board.integrationError}. Showing last available snapshot;
+                pending actions remain queued.
+              </p>
+            )}
+            {board.cards.some((card) => card.dueError || !card.date) && (
+              <div className="error-banner" role="status">
+                Meals needing a due date or time:{" "}
+                {board.cards
+                  .filter((card) => card.dueError || !card.date)
+                  .map(
+                    (card) =>
+                      `${card.name} (${card.dueError || "No due date"})`,
+                  )
+                  .join(", ")}
+              </div>
+            )}
+            {board.cards.some(
+              (card) =>
+                card.date >= days[0].iso &&
+                card.date <= days[6].iso &&
+                !card.slotId,
+            ) && (
+              <p className="warning-banner" role="status">
+                Some meals have times that do not match a preset. They appear in
+                Other meals.
+              </p>
+            )}
             <div className="grid-scroll">
               <table className="meal-grid" data-slot-count={board.slots.length}>
                 <caption className="visually-hidden">Weekly meal plan</caption>
@@ -422,7 +461,7 @@ export function Planner() {
                     </th>
                     {days.map((d) => (
                       <th
-                        className={`day-header${d.iso === iso(new Date()) ? " is-today" : ""}`}
+                        className={`day-header${d.iso === today() ? " is-today" : ""}`}
                         scope="col"
                         key={d.iso}
                       >
@@ -484,7 +523,11 @@ export function Planner() {
                                   "application/x-planned-meal",
                                 ),
                             );
-                            if (card && card.state === "saved")
+                            if (
+                              card &&
+                              card.state === "saved" &&
+                              !card.completed
+                            )
                               void change(card, "move", d.iso, slot);
                           }}
                         >
@@ -498,47 +541,60 @@ export function Planner() {
                               )
                               .map((card) => (
                                 <div
-                                  draggable={card.state === "saved"}
-                                  onDragStart={(e) =>
+                                  draggable={
+                                    card.state === "saved" && !card.completed
+                                  }
+                                  onDragStart={(e) => {
                                     e.dataTransfer.setData(
                                       "application/x-planned-meal",
                                       card.id,
+                                    );
+                                    document.body.classList.add(
+                                      "planner-dragging",
+                                    );
+                                  }}
+                                  onDragEnd={() =>
+                                    document.body.classList.remove(
+                                      "planner-dragging",
+                                      "trash-hover",
                                     )
                                   }
                                   key={card.requestId || card.id}
-                                  className={`meal-chip${card.state === "pending" ? " is-sync-pending" : ""}${card.deleting ? " is-delete-pending" : ""}`}
+                                  className={`meal-chip${card.completed ? " is-complete" : ""}${card.state === "pending" ? " is-sync-pending" : ""}${card.deleting ? " is-delete-pending" : ""}`}
                                 >
                                   <span className="meal-chip-name">
                                     {card.name}
+                                    {card.completed ? " ✓" : ""}
                                   </span>
-                                  {card.state === "saved" && (
-                                    <>
-                                      <button
-                                        className="card-action"
-                                        aria-label={`Move ${card.name}`}
-                                        onClick={() => {
-                                          setTarget(card);
-                                          setMoving(card);
-                                          setDay(card.date);
-                                          setSlotId(
-                                            card.slotId ?? board.slots[0].id,
-                                          );
-                                          dialog.current?.showModal();
-                                        }}
-                                      >
-                                        ↔
-                                      </button>
-                                      <button
-                                        className="card-action"
-                                        aria-label={`Delete ${card.name}`}
-                                        onClick={() =>
-                                          void change(card, "delete")
-                                        }
-                                      >
-                                        ×
-                                      </button>
-                                    </>
-                                  )}
+                                  {card.state === "saved" &&
+                                    !card.completed && (
+                                      <>
+                                        <button
+                                          className="card-action"
+                                          aria-label={`Move ${card.name}`}
+                                          onClick={() => {
+                                            setTarget(card);
+                                            setMoving(card);
+                                            setDay(card.date);
+                                            setSlotId(
+                                              card.slotId ?? board.slots[0].id,
+                                            );
+                                            dialog.current?.showModal();
+                                          }}
+                                        >
+                                          ↔
+                                        </button>
+                                        <button
+                                          className="card-action"
+                                          aria-label={`Delete ${card.name}`}
+                                          onClick={() =>
+                                            void change(card, "delete")
+                                          }
+                                        >
+                                          ×
+                                        </button>
+                                      </>
+                                    )}
                                   {card.state === "pending" ? (
                                     <button
                                       type="button"
@@ -632,6 +688,37 @@ export function Planner() {
                 Add meal
               </button>
             </form>
+            <div
+              className="trash-drop-target"
+              aria-label="Delete dragged planned meal"
+              onDragOver={(e) => {
+                if (
+                  e.dataTransfer.types.includes("application/x-planned-meal")
+                ) {
+                  e.preventDefault();
+                  document.body.classList.add("trash-hover");
+                }
+              }}
+              onDragLeave={() => document.body.classList.remove("trash-hover")}
+              onDrop={(e) => {
+                e.preventDefault();
+                document.body.classList.remove(
+                  "planner-dragging",
+                  "trash-hover",
+                );
+                const card = board.cards.find(
+                  (card) =>
+                    card.id ===
+                    e.dataTransfer.getData("application/x-planned-meal"),
+                );
+                if (card && !card.completed && card.state === "saved") {
+                  setDeleteTarget(card);
+                  deleteDialog.current?.showModal();
+                }
+              }}
+            >
+              <span aria-hidden="true">▤</span>
+            </div>
             <div className="library-list" role="list">
               {board.library
                 .filter((meal) =>
@@ -667,6 +754,30 @@ export function Planner() {
           </aside>
         </main>
       )}
+      <dialog
+        ref={deleteDialog}
+        className="confirm-dialog"
+        aria-label="Confirm meal deletion"
+      >
+        <h2>Delete {deleteTarget?.name}?</h2>
+        <p>This removes the planned meal from Todoist.</p>
+        <button
+          className="secondary-button"
+          onClick={() => deleteDialog.current?.close()}
+        >
+          Cancel
+        </button>
+        <button
+          className="primary-button"
+          onClick={() => {
+            deleteDialog.current?.close();
+            if (deleteTarget) void change(deleteTarget, "delete");
+            setDeleteTarget(null);
+          }}
+        >
+          Delete meal
+        </button>
+      </dialog>
       <dialog
         ref={dialog}
         className="confirm-dialog action-dialog"

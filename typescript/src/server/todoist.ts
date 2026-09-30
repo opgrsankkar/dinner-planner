@@ -4,8 +4,13 @@ import type { Placement, RemoteMeal } from "../types";
 // Providers enforce task project ownership before writes, durable request-ID
 // idempotency, and delete success/404 acknowledgement without a follow-up read.
 export interface Todoist {
+  readonly allowCreateReplay?: boolean;
+  get?(taskId: string, projectId: string): Promise<RemoteMeal | null>;
   mealsProject(): Promise<{ id: string; name: string }>;
-  list(projectId: string): Promise<RemoteMeal[]>;
+  list(
+    projectId: string,
+    options?: { week?: string; fresh?: boolean },
+  ): Promise<RemoteMeal[]>;
   move(
     input: Placement & { taskId: string },
     requestId: string,
@@ -13,8 +18,9 @@ export interface Todoist {
   delete(taskId: string, projectId: string, requestId: string): Promise<void>;
   create(input: Placement, requestId: string): Promise<RemoteMeal>;
 }
-// Separate file models the remote authority; never shares planner tables. No network client in this slice.
+// Offline provider models remote authority in a separate file, never planner tables.
 export class FakeTodoist implements Todoist {
+  readonly allowCreateReplay = true;
   private db: DatabaseSync;
   createCalls = 0;
   moveCalls = 0;

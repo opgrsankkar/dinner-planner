@@ -10,7 +10,7 @@ services:
       SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
       TODOIST_TOKEN: ${TODOIST_TOKEN:-}
       TODOIST_TOKEN_FILE: /run/secrets/todoist-token
-      TODOIST_PROJECT: Meals
+      TODOIST_MODE: live
       DATABASE_PATH: ${DATABASE_PATH:-/data/meals.sqlite3}
       TZ: Asia/Kolkata
       COOKIE_SECURE: "true"
@@ -28,7 +28,7 @@ services:
     cap_drop:
       - ALL
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8789/healthz', timeout=3)"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8789/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 5

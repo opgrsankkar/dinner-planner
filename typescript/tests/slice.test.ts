@@ -15,7 +15,11 @@ before(async () => {
     process.execPath,
     ["node_modules/prisma/dist/prisma.js", "db", "init"],
     {
-      env: { ...process.env, PLANNER_DB: join(root, "template.sqlite") },
+      env: {
+        ...process.env,
+        DATABASE_PATH: join(root, "template.sqlite"),
+        PLANNER_DB: join(root, "template.sqlite"),
+      },
       stdio: "pipe",
     },
   );
@@ -227,12 +231,17 @@ test("changed Meals project ownership prevents create; bad acknowledgement remai
     await g.close();
   }
 });
-test("active meals come from provider, not saved outbox rows", async () => {
+test("saved write overlay is bounded, then provider is authoritative", async () => {
   const f = await fixture();
   try {
     await f.store.place(f.input, f.project.id);
     await f.worker.tick();
     f.provider.list = async () => [];
+    assert.equal((await f.store.board(f.provider)).cards.length, 1);
+    const row = (await f.store.db.orm.Outbox.all())[0];
+    await f.store.db.orm.Outbox.where({ id: row.id }).update({
+      confirmedAt: String(Date.now() - 120001),
+    });
     assert.equal((await f.store.board(f.provider)).cards.length, 0);
   } finally {
     await f.close();
@@ -513,7 +522,10 @@ test("additive initialization upgrades a synthetic first-slice database without 
   execFileSync(
     process.execPath,
     ["node_modules/prisma/dist/prisma.js", "db", "init"],
-    { env: { ...process.env, PLANNER_DB: f.path }, stdio: "pipe" },
+    {
+      env: { ...process.env, DATABASE_PATH: f.path, PLANNER_DB: f.path },
+      stdio: "pipe",
+    },
   );
   const store = new Store(f.path),
     provider = new FakeTodoist(f.providerPath);
@@ -609,6 +621,150 @@ test("move acknowledgement mismatch stays pending and remote task ownership is e
       ),
       /ownership/,
     );
+  } finally {
+    await f.close();
+  }
+});
+
+test("real adapter uncertain create survives worker restart and invisible markers without replay", async () => {
+  const { TodoistApi } = await import("../src/server/todoist-api");
+  const f = await fixture();
+  const projectId = "6XGgm6PHrGgMpCFX";
+  let visible = false,
+    creates = 0;
+  const fetcher: typeof fetch = async (url, init) => {
+    const path = new URL(String(url)).pathname;
+    if (path.endsWith("projects"))
+      return Response.json({
+        results: [{ id: projectId, name: "Meals" }],
+        next_cursor: null,
+      });
+    if (path.endsWith("by_due_date"))
+      return Response.json({ items: [], next_cursor: null });
+    if (init?.method === "POST") {
+      creates++;
+      throw new Error("Lost response after server created task");
+    }
+    return Response.json({
+      results: visible
+        ? [
+            {
+              id: "6XGgmFVcrG5RRjVr",
+              project_id: projectId,
+              content: "Idli & sambar",
+              description: `meal-planner-request-id: ${f.input.requestId}`,
+              due: { date: "2026-10-01T08:00:00+05:30" },
+            },
+          ]
+        : [],
+      next_cursor: null,
+    });
+  };
+  try {
+    const api = new TodoistApi("synthetic-token", fetcher);
+    await f.store.place(f.input, projectId);
+    const worker = new Worker(f.store, api);
+    await worker.tick();
+    await worker.stop();
+    assert.equal(creates, 1);
+    await f.store.retry(f.input.requestId, api);
+    const restarted = new Worker(
+      f.store,
+      new TodoistApi("synthetic-token", fetcher),
+    );
+    await restarted.tick();
+    assert.equal(creates, 1);
+    assert.match((await f.store.board(api)).cards[0].error, /uncertain/);
+    visible = true;
+    await f.store.retry(f.input.requestId, api);
+    await restarted.tick();
+    await restarted.stop();
+    const row = (await f.store.db.orm.Outbox.all())[0];
+    assert.equal(row.state, "saved");
+    assert.equal(row.remoteId, "6XGgmFVcrG5RRjVr");
+    assert.equal(creates, 1);
+  } finally {
+    await f.close();
+  }
+});
+test("completed real tasks have no fake request marker and remain noneditable; failures retain usable local board", async () => {
+  const f = await fixture();
+  try {
+    const project = await f.provider.mealsProject();
+    f.provider.list = async () => [
+      {
+        id: "opaque-real-id",
+        projectId: project.id,
+        name: "Completed",
+        date: f.input.date,
+        time: "08:00",
+        requestId: "",
+        completed: true,
+      },
+    ];
+    const board = await f.store.board(f.provider);
+    assert.equal(board.cards[0].completed, true);
+    assert.equal(board.cards[0].requestId, "");
+    await assert.rejects(
+      f.store.change(
+        { requestId: randomUUID(), taskId: "opaque-real-id", kind: "delete" },
+        f.provider,
+      ),
+      /completed/,
+    );
+    f.provider.list = async () => {
+      throw new Error("Todoist request failed (503)");
+    };
+    const failed = await f.store.board(f.provider);
+    assert.equal(failed.cards.length, 1);
+    assert.equal(failed.library.length, 3);
+    assert.match(failed.integrationError ?? "", /503/);
+  } finally {
+    await f.close();
+  }
+});
+
+test("slot save migrates prior aliases, excludes completed meals and refuses occupied slot removal", async () => {
+  const f = await fixture();
+  try {
+    await f.store.place(f.input, f.project.id);
+    await f.worker.tick();
+    const board = await f.store.board(f.provider);
+    const setting = (await f.store.db.orm.Setting.all())[0];
+    await f.store.db.orm.Setting.where({ id: setting.id }).update({
+      value: JSON.stringify({
+        ...board.settings,
+        aliases: { "07:45": f.input.slotId },
+      }),
+    });
+    const list = f.provider.list.bind(f.provider);
+    f.provider.list = async (projectId) => {
+      const remote = await list(projectId);
+      return [
+        ...remote.map((task) => ({ ...task, time: "07:45" })),
+        {
+          ...remote[0],
+          id: "completed-history",
+          completed: true,
+          time: "07:45",
+        },
+      ];
+    };
+    await assert.rejects(
+      f.store.saveSlots(
+        board.slots.filter((slot) => slot.id !== f.input.slotId),
+        board.settings.revision,
+        f.provider,
+      ),
+      /Move or complete/,
+    );
+    await f.store.saveSlots(board.slots, board.settings.revision, f.provider);
+    const pending = (await f.store.db.orm.Outbox.all()).filter(
+      (row) => row.state === "pending",
+    );
+    assert.equal(pending.length, 1);
+    assert.equal(JSON.parse(pending[0].payload).time, "08:00");
+    assert.notEqual(JSON.parse(pending[0].payload).taskId, "completed-history");
   } finally {
     await f.close();
   }

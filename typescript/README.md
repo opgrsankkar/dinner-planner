@@ -1,51 +1,13 @@
-# TypeScript vertical slice (offline)
+# Full-stack TypeScript Dinner Planner
 
-This directory is a fresh TanStack Start/React implementation based on current master behavior. It does not change the deployed Python application, root Dockerfile, Compose configuration, existing data, or Todoist. All provider calls use a persistent fake Todoist database, separate from the planner database. No live provider adapter is installed.
+TanStack Start/React, strict TypeScript, Node 26 and experimental Prisma ORM 8 SQLite. Todoist is the authority for planned meals. Local SQLite contains settings, reusable library, slots, sessions and a durable mutation outbox. Run one application/worker per database.
 
-Use Node **26.10.0** (Node 26 required). The implementation session uses `/home/hermes-admin/.hermes/cache/scratch/dinner-node/node_modules/.bin`. To install it without sudo in durable user-owned tooling:
+## Build and verify
 
 ```sh
+export PATH=/home/hermes-admin/.hermes/cache/scratch/dinner-node/node_modules/.bin:$PATH
 export TMPDIR=/home/hermes-admin/.hermes/cache/scratch
-npm --cache "$TMPDIR/dinner-npm" install --prefix "$HOME/.local/share/dinner-planner-node" node@26.10.0
-export PATH="$HOME/.local/share/dinner-planner-node/node_modules/.bin:$PATH"
-cd /home/hermes-admin/Projects/dinner-planner/typescript
-npm ci
-```
-
-Set a password without putting it in shell history or logs, then start the offline demo:
-
-```sh
-read -r -s -p 'Demo password: ' PLANNER_PASSWORD; printf '\n'
-export PLANNER_PASSWORD
-npm run demo
-```
-
-Open **http://localhost:3000**. Sign in with the password you set. Demo startup initializes the Prisma database idempotently and starts Vite/TanStack Start on loopback port 3000. Use only one application process per planner database. Stop with Ctrl+C and run the same command again to resume pending writes. The default files are `.local/planner.sqlite` (operational state) and `.local/fake-todoist.sqlite` (fake remote authority), both ignored by Git. They are entirely separate from the Python `data/` directory.
-
-Optional offline scenarios, set before startup:
-
-```sh
-export FAKE_TODOIST_DELAY_MS=4000       # spinner stays visible across reload
-export FAKE_TODOIST_FAIL_BEFORE=2       # first two creates fail before writing
-export FAKE_TODOIST_LOSE_RESPONSE=1     # first create writes, then loses its response
-npm run demo
-```
-
-Failure counts reset on process restart, so unset them before restarting if you want recovery immediately. `PLANNER_DB` and `FAKE_TODOIST_DB` may point to other synthetic files; initialize the planner with `npm run db:init` using the same environment. `PLANNER_ORIGIN` defaults to `http://localhost:3000`; set it to the exact browser origin when changing the port or serving HTTPS. HTTPS uses a Secure session cookie. No forwarded-host headers are trusted.
-
-## Implemented behavior
-
-- Password login, SQLite sessions with seven-day expiry, server-side logout, HttpOnly/SameSite cookies, strict host and mutation Origin checks, session CSRF tokens, bounded login attempts. The password stays server-side in the environment.
-- Weekly board, preset Breakfast/Lunch/Dinner slots, reusable library addition/search, active provider meal cards, week navigation and This week.
-- Library drag placement and keyboard/touch Plan dialog. Existing CSS, icon assets, small spinner/check feedback and light/dark/system themes are reused. Theme choice is server-owned, shared across browser sessions, and follows system changes.
-- Placement snapshots the library meal and slot into a durable outbox transaction. Request IDs are UUIDs and unique primary keys. Repeated identical submissions reuse the operation; conflicting reuse is rejected.
-- Pending cards are temporary projections of outbox intent. Confirmed cards come from the provider, not saved outbox rows. A background worker validates Meals project ownership and the create acknowledgement before marking an operation saved. A check appears for two seconds, then disappears.
-- Failed operations stay pending with their error and exponential automatic retries capped at 30 seconds. The worker searches the placement request marker before create and preserves the original request ID on every attempt. The injectable provider contract requires idempotent create by request ID; the fake enforces this in its own durable SQLite table.
-- Lost browser acknowledgements retain the exact submission in sessionStorage for reload and explicit retry. Definitive HTTP rejection removes the temporary local card. Once the server exposes an operation, the durable server outbox takes over.
-
-## Verification
-
-```sh
+cd typescript
 npm ci
 npm run contract
 npm test
@@ -54,27 +16,46 @@ npm run build
 npm run smoke
 ```
 
-Tests initialize new synthetic Prisma databases under `TMPDIR` (set it to the scratch root above); they never read Python data or call Todoist. They prove restart durability, rollback, repeated/concurrent request idempotency, recovery after uncertain create, retry after pre-write failure, project ownership, provider authority, session expiry/logout, CSRF and Origin/host rejection. `npm run smoke` launches an isolated demo on **3100**, uses a randomly generated password without printing it, runs HTTP and desktop/mobile browser interactions, then cleans up. It uses `/usr/bin/google-chrome`; set `CHROME_PATH` to another installed Chromium executable if necessary.
+The smoke starts **the actual production artifact** (`dist/server/server.js` plus `dist/client`) with `scripts/serve.mjs`, on loopback 3100. It uses fresh synthetic databases, a generated password and explicit fake mode. It exercises HTTP authentication, static assets, desktop/mobile interaction, native drag placement/move/delete, button alternatives, pending/retry/reload, settings Save/Revert/reorder, themes, completed cards, integration warnings, week navigation and logout. Browser default is `/usr/bin/google-chrome`; override `CHROME_PATH` if needed. Tests inject fetch for the real adapter; no test accesses real Todoist or deployment files.
 
-The production build emits `dist/client` and `dist/server/server.js`. Production Node hosting/container integration and deployment are deliberately outside this milestone; use the development command above to run this slice.
+## Production
 
-## Current package compatibility
+From `typescript`, `npm run build && npm start`. The host listens on `HOST` (default `0.0.0.0`) and `PORT` (default `8789`), serves generated assets and passes application requests to TanStack Start's built fetch handler. `/healthz` is public and never initializes/calls Todoist. On a new database path, the host runs Prisma `db init`; an imported database is used directly. Database initialization failure stops startup. Graceful shutdown allows in-flight requests up to 20 seconds; pending outbox work survives restart.
 
-Pinned packages and lockfile use Prisma ORM SQLite `8.0.0-rc.14`, Prisma CLI `8.0.0-rc.19`, TanStack Start `1.168.59`, React `19.3.0`, Vite `8.3.1`, and TypeScript `5.9.3`. Prisma CLI bundles toolchain `rc.13`; an explicit override aligns it to SQLite's `rc.14`. Without that alignment, contract emission fails with `CONTRACT.PACK_CONTRIBUTION_INVALID` (malformed `enum` authoring contribution). Contract emission and SQLite initialization work with the override.
+The root Dockerfile builds with Node 26 and runs checks, then supplies the actual production artifact and Prisma tooling for initialization/import. Compose preserves bridge-only `172.17.0.1:8789`, host UID/GID, read-only root, writable `/data`, read-only token mount, dropped capabilities and the existing Caddy site. No domain/proxy change is needed. Hermes must verify Docker build/runtime on its Docker-enabled host.
 
-Current primary references consulted: [Prisma 8 SQLite runtime/config](https://www.prisma.io/extensions/sqlite), [Prisma SQLite example](https://github.com/prisma/orm/tree/main/examples/prisma-8-demo-sqlite), [TanStack Start setup](https://tanstack.com/start/latest/docs/framework/react/build-from-scratch). Installed package type declarations were also checked for the pinned API.
+Environment compatibility:
 
-`npm audit` currently reports 13 findings (5 moderate, 8 high), predominantly through Prisma CLI/Composer dependencies. Audit's proposed direct Prisma fix downgrades to 7.10.0, which violates the required stack. These need upstream review before eventual deployment; no downgrade or forced upgrade was applied.
+- `APP_PASSWORD` (legacy alias `PLANNER_PASSWORD`) is required. Sessions are random, server-side SQLite records; `SESSION_SECRET` remains accepted by Compose but is unnecessary for these opaque session IDs. Old signed cookies require a fresh login at cutover.
+- `TODOIST_TOKEN` takes precedence over `TODOIST_TOKEN_FILE`. Default mode is live and missing/invalid configuration never falls back to a fake. `TODOIST_MODE=fake` is explicit offline demo/testing only; use a separate database.
+- `DATABASE_PATH` (alias `PLANNER_DB`) defaults to `.local/planner.sqlite` outside Compose, `/data/meals.sqlite3` in Compose. At cutover set it to the **new imported file**, never the old Python file.
+- `TZ=Asia/Kolkata`; planner dates/times are explicitly interpreted in Asia/Kolkata regardless of browser/host timezone.
+- `ALLOWED_HOSTS` is a comma-separated hostname list. Without it, API uses `PLANNER_ORIGIN` (default `http://localhost:8789`). `COOKIE_SECURE=true` is used for Caddy HTTPS and sets the request protocol used by Origin checks; local HTTP tests leave it unset. No forwarded Host is trusted.
 
-## Subsequent slices
+## Todoist adapter and reconciliation
 
-History/reconciliation, live Todoist adapter, actual operational data migration, production hosting and deployment remain for the next milestone. A real Todoist adapter must preserve stable `X-Request-Id` and a durable task description marker, resolve a scoped Meals project, and handle uncertain creates without duplicate writes; do not substitute an in-memory successful response. Future delete must treat success/404 as acknowledgement without an immediate GET.
+The injected-fetch adapter follows [official Todoist API v1 docs](https://developer.todoist.com/api/v1/). It resolves exactly one unarchived project named `Meals`, paginates projects/active tasks (`results`) and completed history (`items`), deduplicates IDs, checks project ownership before writes, and encodes opaque task IDs. Completed history is queried **by due date for the selected week** (within the documented six-week maximum range), so a task completed on another day still appears in its scheduled cell. Completed cards cannot be edited.
 
-## Move/delete and Settings milestone
+Current v1 create/update schemas accept `due_datetime` but do not expose `due_timezone`. Payloads therefore use RFC3339 `+05:30`, expressing Asia/Kolkata without relying on account timezone. Responses accept v1 `due.date`, legacy `due.datetime`, zoned timestamps and India floating timestamps. Missing/invalid/unsupported floating timezone values remain visible as warnings rather than invented times. Unknown slot times appear under Other meals. Moves update only the due datetime and preserve task descriptions/content.
 
-- Planned cards support drag moves plus Move and Delete buttons. Each accepted operation snapshots a scoped task into durable outbox intent. Pending moves project the destination; pending deletes retain a dim card and small spinner. Errors expose a compact retry button, alongside automatic backoff. Browser-held uncertain HTTP intent preserves its request ID across reload; the board returns scoped received IDs to acknowledge even already-completed deletes.
-- The fake provider persists move/delete receipts independently from planner tables, supports delayed writes, pre-write errors and lost post-write responses. Missing-task delete is acknowledgement. The worker never follows a successful delete with an immediate provider GET; saved delete markers suppress stale list results.
-- `/settings` uses the accepted CSS layout, Appearance radio choices, library search/removal, slot labels/times, drag and button reorder, add/remove, and a baseline-aware Save/Revert form. Save has fixed 112px spinner/check/failure states. Failed saves keep the draft and baseline intact. Library removal never changes planned tasks; shuffle order persists server-side. Removing a slot leaves remote meals visible in “Other meals” with Move/Delete controls.
-- Slot saves require a matching revision and unique times. The slot replacement, order/revision and remote time intents commit together. Old-time aliases classify remote tasks temporarily while matching intents remain pending. To avoid conflicting intent, slot saves report an error while any meal write is pending; retry the save after synchronization.
-- Prisma adds only the `setting` table. For a disposable first-slice/demo DB, `npm run db:init` applies the additive table creation without deleting existing rows. Tests exercise this synthetic upgrade path. No Python or production data migration is included.
-- Additional fake scenarios: `FAKE_TODOIST_MOVE_FAIL_BEFORE=2` and `FAKE_TODOIST_DELETE_FAIL_BEFORE=2`. The browser smoke uses these and placement failures to exercise retry, and injects one synthetic Settings HTTP error to verify draft/failure/Revert behavior.
+Every mutation preserves its UUID `X-Request-Id`. Creates also have a durable `meal-planner-request-id: UUID` description line. A create attempt is recorded **before** the request. After an uncertain network/server response or restart, the worker searches the original marker and never issues another create while the result is unknown. A known remote ID is retained before acknowledgement validation. Definitive HTTP rejections can retry the same request ID; uncertain requests remain pending with an actionable error until the original task becomes visible. Do not clear an uncertain request without inspecting its marker in Meals. DELETE success/404 is acknowledgement, with no immediate GET afterward.
+
+Project lookup is cached for 60 seconds. Active snapshots use 15 seconds, history snapshots 60 seconds, deduplicated in-flight requests, bounded cache entries and a 15-second failure cooldown. Rate limits honor Retry-After globally. Half-second UI refresh reads cached snapshots plus local outbox overlays, not a project/task round trip each time. Combined week snapshots can take up to 60 seconds to reflect external changes. Successful create/move overlays expire after two minutes, or stop as soon as a listing confirms them; delete suppression expires after two minutes. External edits/deletions then take precedence. Failed fetches retain a bounded in-memory last snapshot and expose integration errors. The outbox survives restarts; snapshots are temporary and do not become a permanent plan database.
+
+## Offline demo
+
+Set `TODOIST_MODE=fake`, `APP_PASSWORD`, `PLANNER_ORIGIN=http://localhost:3000`, then `npm run demo`. Default fake data includes three example meals and slots. Live initialization uses the four legacy slot presets and an empty meal library. Fake-only optional error/delay settings: `FAKE_TODOIST_DELAY_MS`, `FAKE_TODOIST_FAIL_BEFORE`, `FAKE_TODOIST_LOSE_RESPONSE`, `FAKE_TODOIST_MOVE_FAIL_BEFORE`, `FAKE_TODOIST_DELETE_FAIL_BEFORE`. Unset failure counts when testing restart recovery.
+
+## Legacy backup import and cutover (Hermes)
+
+The importer never accesses a deployment path implicitly. Supply a **consistent, standalone SQLite backup** and a distinct **nonexistent** target:
+
+```sh
+npm run import:legacy -- --source /explicit/backup.sqlite --target /data/meals-typescript.sqlite
+```
+
+It opens the source read-only, checks integrity/schema and refuses unresolved pending/processing/failed actions, deletion tombstones and local optimistic cache entries. These cannot be safely converted/replayed. Leave the old worker active to drain/reconcile, inspect uncertain create markers and failed writes, wait for old tombstones to reconcile (old cleanup requires 30 minutes plus a fresh task listing), then take a new backup. Do not manually delete unresolved rows to bypass preflight. Completed receipts and ordinary remote snapshots are not imported: Todoist supplies the current plan, and no writes are replayed.
+
+Import preserves library UUIDs/order and rejects case-insensitive duplicate names. Human-readable legacy slot IDs map deterministically to UUIDs; the full original slot IDs/order/aliases/inactive state and KV settings are retained in settings import metadata. Active slots and unambiguous aliases are applied to the new planner. Theme is preserved. A staged database transaction is closed/checkpointed and published exclusively; failure leaves no target, and rerun refuses an existing target. Tests prove byte-identical source, rollback, refusal and rerun behavior. Legacy library IDs outside the existing UUIDv4 convention require repair on a separate backup copy and are explicitly refused.
+
+Cutover sequence: drain old actions and reconcile tombstones; retain old artifact/config and backup; stop the old mutation worker; take the final consistent backup; import into the new path; set `DATABASE_PATH`; start the new container; verify health, login, library/settings and actual scoped Todoist writes with Hermes. Never run old and new workers simultaneously. To roll back, stop the new worker and restore old artifact/config/database path. Reconcile any writes performed since cutover in Todoist before replaying old pending state. Backup files and originals remain untouched by the CLI.

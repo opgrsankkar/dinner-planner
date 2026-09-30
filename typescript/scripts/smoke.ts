@@ -1,7 +1,8 @@
 import { chromium } from "@playwright/test";
-import { spawn, execFileSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
@@ -9,7 +10,15 @@ const directory = await mkdtemp(join(tmpdir(), "planner-browser-"));
 const password = randomUUID();
 const env = {
   ...process.env,
-  PLANNER_PASSWORD: password,
+  TODOIST_MODE: "fake",
+  TODOIST_TOKEN: "",
+  TODOIST_TOKEN_FILE: "",
+  ALLOWED_HOSTS: "127.0.0.1,localhost",
+  COOKIE_SECURE: "false",
+  DATABASE_PATH: join(directory, "planner.sqlite"),
+  APP_PASSWORD: password,
+  PORT: "3100",
+  HOST: "127.0.0.1",
   PLANNER_ORIGIN: "http://127.0.0.1:3100",
   PLANNER_DB: join(directory, "planner.sqlite"),
   FAKE_TODOIST_DB: join(directory, "provider.sqlite"),
@@ -19,16 +28,31 @@ const env = {
   FAKE_TODOIST_MOVE_FAIL_BEFORE: "2",
   FAKE_TODOIST_DELETE_FAIL_BEFORE: "2",
 };
-execFileSync(
-  process.execPath,
-  ["node_modules/prisma/dist/prisma.js", "db", "init"],
-  { env, stdio: "pipe" },
+const refused = spawnSync(process.execPath, ["scripts/serve.mjs"], {
+  env: {
+    ...env,
+    TODOIST_MODE: "live",
+    DATABASE_PATH: join(directory, "unconfigured.sqlite"),
+    PLANNER_DB: join(directory, "unconfigured.sqlite"),
+  },
+  encoding: "utf8",
+  timeout: 30000,
+});
+assert.notEqual(
+  refused.status,
+  0,
+  "Live startup must refuse missing credentials",
 );
-const server = spawn(
-  process.execPath,
-  ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", "3100"],
-  { env, stdio: ["ignore", "pipe", "pipe"] },
+assert.match(refused.stderr, /Todoist credentials are required/);
+assert.equal(
+  existsSync(env.FAKE_TODOIST_DB),
+  false,
+  "Live config never falls back to fake",
 );
+const server = spawn(process.execPath, ["scripts/serve.mjs"], {
+  env,
+  stdio: ["ignore", "pipe", "pipe"],
+});
 let serverOutput = "";
 server.stdout.on("data", (chunk) => {
   serverOutput += chunk;
@@ -41,7 +65,7 @@ try {
   let ready = false;
   for (let attempt = 0; attempt < 60; attempt++) {
     try {
-      const response = await fetch("http://127.0.0.1:3100/api/health");
+      const response = await fetch("http://127.0.0.1:3100/healthz");
       if (response.ok) {
         ready = true;
         break;
@@ -50,6 +74,15 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   assert.ok(ready, `Server did not start: ${serverOutput}`);
+  assert.equal(
+    existsSync(env.FAKE_TODOIST_DB),
+    false,
+    "Public health does not initialize the provider",
+  );
+  assert.equal((await fetch("http://127.0.0.1:3100/api/board")).status, 401);
+  const css = await fetch("http://127.0.0.1:3100/static/app.css");
+  assert.equal(css.headers.get("content-type"), "text/css");
+  assert.ok((await css.text()).includes("meal-grid"));
   browser = await chromium.launch({
     executablePath: process.env.CHROME_PATH ?? "/usr/bin/google-chrome",
     args: ["--no-sandbox"],
@@ -64,6 +97,84 @@ try {
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("heading", { name: "Meal library" }).waitFor();
+  // Exercise history classification and integration warnings through synthetic
+  // HTTP snapshots; this is UI evidence, separately from adapter contract tests.
+  let synthetic = true;
+  await page.route("**/api/board?*", async (route) => {
+    const response = await route.fetch();
+    const board = await response.json();
+    if (synthetic) {
+      const week = new URL(route.request().url()).searchParams.get("week")!;
+      board.integrationError = "Synthetic Todoist unavailable";
+      board.cards.push({
+        id: "real-completed",
+        projectId: board.projectId,
+        name: "History meal",
+        date: week,
+        time: board.slots[0].time,
+        slotId: board.slots[0].id,
+        requestId: "",
+        completed: true,
+        state: "saved",
+        error: "",
+        confirmedAt: 0,
+      });
+      board.cards.push({
+        id: "undated",
+        projectId: board.projectId,
+        name: "Undated meal",
+        date: "",
+        time: "",
+        requestId: "",
+        dueError: "No due date/time",
+        state: "saved",
+        error: "",
+        confirmedAt: 0,
+      });
+      board.cards.push({
+        id: "unmatched",
+        projectId: board.projectId,
+        name: "Odd time",
+        date: week,
+        time: "09:37",
+        requestId: "",
+        state: "saved",
+        error: "",
+        confirmedAt: 0,
+      });
+    }
+    await route.fulfill({ response, json: board });
+  });
+  await page
+    .locator(".meal-chip")
+    .filter({ hasText: "History meal" })
+    .waitFor();
+  const completed = page
+    .locator(".meal-chip")
+    .filter({ hasText: "History meal" });
+  assert.equal(await completed.getAttribute("draggable"), "false");
+  assert.equal(await completed.locator("button").count(), 0);
+  await page
+    .getByText("Synthetic Todoist unavailable", { exact: false })
+    .waitFor();
+  await page
+    .getByText("Undated meal (No due date/time)", { exact: false })
+    .waitFor();
+  await page.locator(".meal-chip").filter({ hasText: "Odd time" }).waitFor();
+  await page
+    .getByRole("button", { name: "Previous week", exact: true })
+    .click();
+  await page
+    .locator(".meal-chip")
+    .filter({ hasText: "History meal" })
+    .waitFor();
+  synthetic = false;
+  await page.unroute("**/api/board?*");
+  await page.getByRole("button", { name: "This week", exact: true }).click();
+  await page
+    .locator(".meal-chip")
+    .filter({ hasText: "History meal" })
+    .waitFor({ state: "detached" });
   await page.getByRole("searchbox").fill("Browser smoke meal");
   await page.getByRole("button", { name: "Add meal", exact: true }).click();
   await page
@@ -336,6 +447,23 @@ try {
     "Lunch",
   );
   await mobile.close();
+  const dragMeal = page
+    .locator(".meal-chip")
+    .filter({ hasText: "Vegetable pasta" });
+  await dragMeal.waitFor();
+  await dragMeal.dragTo(
+    page.getByLabel("Delete dragged planned meal", { exact: true }),
+    { force: true },
+  );
+  await page.getByRole("dialog", { name: "Confirm meal deletion" }).waitFor();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  assert.equal(await dragMeal.count(), 1);
+  await dragMeal.dragTo(
+    page.getByLabel("Delete dragged planned meal", { exact: true }),
+    { force: true },
+  );
+  await page.getByRole("button", { name: "Delete meal", exact: true }).click();
+  await dragMeal.waitFor({ state: "detached" });
   await page.getByRole("button", { name: "Log out", exact: true }).click();
   await page.getByRole("button", { name: "Sign in", exact: true }).waitFor();
   assert.equal(
@@ -344,7 +472,7 @@ try {
   );
   assert.deepEqual(errors, []);
   console.log(
-    "HTTP and desktop/mobile browser smoke passed: login, add, Plan, drag placement/move, button move/delete, retry, reload pending, spinner/check, Settings Save/Revert/failure/reorder, library removal preserving plan, theme, navigation, logout.",
+    "HTTP and desktop/mobile browser smoke passed: login, add, Plan, drag placement/move, button move/delete, retry, reload pending, spinner/check, Settings Save/Revert/failure/reorder, library removal preserving plan, theme, completed history/warnings, navigation, drag delete confirmation, logout.",
   );
 } finally {
   await browser?.close();

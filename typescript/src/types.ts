@@ -15,6 +15,9 @@ export type RemoteMeal = {
   date: string;
   time: string;
   requestId: string;
+  completed?: boolean;
+  description?: string;
+  dueError?: string;
 };
 export type Card = RemoteMeal & {
   state: "pending" | "saved";
@@ -31,6 +34,7 @@ export type Board = {
   settings: Settings;
   receivedRequests: string[];
   projectId: string;
+  integrationError?: string;
 };
 
 export type Settings = {

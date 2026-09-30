@@ -1,9 +1,10 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { Slot } from "../types";
 import { Store, Worker } from "./store";
 import { FakeTodoist } from "./todoist";
+import { TodoistApi } from "./todoist-api";
 import type { Todoist } from "./todoist";
 export type App = {
   store: Store;
@@ -18,25 +19,45 @@ const globalApp = globalThis as typeof globalThis & {
 };
 export function app(): Promise<App> {
   return (globalApp.plannerApp ??= (async () => {
-    const password = process.env.PLANNER_PASSWORD;
-    if (!password)
-      throw new Error("Set PLANNER_PASSWORD before starting the offline demo");
-    const path = resolve(process.env.PLANNER_DB ?? ".local/planner.sqlite");
+    const password = process.env.APP_PASSWORD ?? process.env.PLANNER_PASSWORD;
+    if (!password) throw new Error("Set APP_PASSWORD before starting");
+    const path = resolve(
+      process.env.DATABASE_PATH ??
+        process.env.PLANNER_DB ??
+        ".local/planner.sqlite",
+    );
     mkdirSync(dirname(path), { recursive: true });
     const store = new Store(path);
-    await store.seed();
-    const todoist = new FakeTodoist(
-      resolve(process.env.FAKE_TODOIST_DB ?? ".local/fake-todoist.sqlite"),
-    );
-    todoist.delayMs = Number(process.env.FAKE_TODOIST_DELAY_MS ?? 1200);
-    todoist.moveFailBefore = Number(
-      process.env.FAKE_TODOIST_MOVE_FAIL_BEFORE ?? 0,
-    );
-    todoist.deleteFailBefore = Number(
-      process.env.FAKE_TODOIST_DELETE_FAIL_BEFORE ?? 0,
-    );
-    todoist.failBefore = Number(process.env.FAKE_TODOIST_FAIL_BEFORE ?? 0);
-    todoist.loseResponse = Number(process.env.FAKE_TODOIST_LOSE_RESPONSE ?? 0);
+    await store.seed(process.env.TODOIST_MODE === "fake");
+    let todoist: Todoist;
+    if (process.env.TODOIST_MODE === "fake") {
+      const fake = new FakeTodoist(
+        resolve(process.env.FAKE_TODOIST_DB ?? ".local/fake-todoist.sqlite"),
+      );
+      fake.delayMs = Number(process.env.FAKE_TODOIST_DELAY_MS ?? 1200);
+      fake.moveFailBefore = Number(
+        process.env.FAKE_TODOIST_MOVE_FAIL_BEFORE ?? 0,
+      );
+      fake.deleteFailBefore = Number(
+        process.env.FAKE_TODOIST_DELETE_FAIL_BEFORE ?? 0,
+      );
+      fake.failBefore = Number(process.env.FAKE_TODOIST_FAIL_BEFORE ?? 0);
+      fake.loseResponse = Number(process.env.FAKE_TODOIST_LOSE_RESPONSE ?? 0);
+      todoist = fake;
+    } else {
+      if (process.env.TODOIST_MODE && process.env.TODOIST_MODE !== "live")
+        throw new Error("Invalid TODOIST_MODE");
+      const token =
+        process.env.TODOIST_TOKEN?.trim() ||
+        (process.env.TODOIST_TOKEN_FILE
+          ? readFileSync(process.env.TODOIST_TOKEN_FILE, "utf8").trim()
+          : "");
+      if (!token)
+        throw new Error(
+          "Configure TODOIST_TOKEN_FILE or TODOIST_TOKEN; offline demo requires explicit TODOIST_MODE=fake",
+        );
+      todoist = new TodoistApi(token);
+    }
     const worker = new Worker(store, todoist);
     worker.start();
     return {
@@ -44,7 +65,7 @@ export function app(): Promise<App> {
       todoist,
       worker,
       password,
-      origin: process.env.PLANNER_ORIGIN ?? "http://localhost:3000",
+      origin: process.env.PLANNER_ORIGIN ?? "http://localhost:8789",
       loginFailures: { count: 0, resetAt: 0 },
     };
   })());
@@ -64,7 +85,7 @@ function json(
   });
 }
 function cookie(token: string, origin: string, logout = false) {
-  return `planner_session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${logout ? 0 : 604800}${origin.startsWith("https:") ? "; Secure" : ""}`;
+  return `planner_session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${logout ? 0 : 604800}${process.env.COOKIE_SECURE === "true" || origin.startsWith("https:") ? "; Secure" : ""}`;
 }
 export async function handle(
   request: Request,
@@ -77,12 +98,19 @@ export async function handle(
     allowed.hostname === "localhost" &&
     url.hostname === "127.0.0.1" &&
     url.port === allowed.port;
-  if (url.host !== allowed.host && !localAlias)
+  const allowedHosts = process.env.ALLOWED_HOSTS?.split(",").map((host) =>
+    host.trim(),
+  );
+  if (
+    allowedHosts
+      ? !allowedHosts.includes(url.hostname)
+      : url.host !== allowed.host && !localAlias
+  )
     return json({ error: "Unrecognized host" }, 403);
   if (request.method !== "GET" && request.headers.get("origin") !== url.origin)
     return json({ error: "Invalid request origin" }, 403);
   if (request.method === "GET" && url.pathname === "/api/health")
-    return json({ ok: true, provider: "offline-fake" });
+    return json({ ok: true });
   try {
     if (url.pathname === "/api/login" && request.method === "POST") {
       if (Date.now() > current.loginFailures.resetAt)
@@ -126,8 +154,19 @@ export async function handle(
         "Set-Cookie": cookie("", origin, true),
       });
     }
-    if (url.pathname === "/api/board" && request.method === "GET")
-      return json({ ...(await store.board(todoist)), csrf: session.csrf });
+    if (url.pathname === "/api/board" && request.method === "GET") {
+      const week = url.searchParams.get("week") ?? undefined;
+      if (
+        week &&
+        (!/^\d{4}-\d{2}-\d{2}$/.test(week) ||
+          !Number.isFinite(Date.parse(week + "T12:00:00Z")))
+      )
+        throw new Error("Invalid week");
+      return json({
+        ...(await store.board(todoist, week)),
+        csrf: session.csrf,
+      });
+    }
     if (
       request.method === "POST" &&
       [
