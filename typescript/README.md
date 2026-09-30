@@ -2,11 +2,12 @@
 
 This directory is a fresh TanStack Start/React implementation based on current master behavior. It does not change the deployed Python application, root Dockerfile, Compose configuration, existing data, or Todoist. All provider calls use a persistent fake Todoist database, separate from the planner database. No live provider adapter is installed.
 
-Use Node **26.10.0** (Node 26 required). The implementation session selected it in `/tmp/dinner-node/node_modules/.bin`; that temporary installation is not a deployment dependency. To install it without sudo in user-owned project tooling:
+Use Node **26.10.0** (Node 26 required). The implementation session uses `/home/hermes-admin/.hermes/cache/scratch/dinner-node/node_modules/.bin`. To install it without sudo in durable user-owned tooling:
 
 ```sh
-npm --cache /tmp/dinner-npm install --prefix /tmp/dinner-node node@26.10.0
-export PATH=/tmp/dinner-node/node_modules/.bin:$PATH
+export TMPDIR=/home/hermes-admin/.hermes/cache/scratch
+npm --cache "$TMPDIR/dinner-npm" install --prefix "$HOME/.local/share/dinner-planner-node" node@26.10.0
+export PATH="$HOME/.local/share/dinner-planner-node/node_modules/.bin:$PATH"
 cd /home/hermes-admin/Projects/dinner-planner/typescript
 npm ci
 ```
@@ -36,7 +37,7 @@ Failure counts reset on process restart, so unset them before restarting if you 
 
 - Password login, SQLite sessions with seven-day expiry, server-side logout, HttpOnly/SameSite cookies, strict host and mutation Origin checks, session CSRF tokens, bounded login attempts. The password stays server-side in the environment.
 - Weekly board, preset Breakfast/Lunch/Dinner slots, reusable library addition/search, active provider meal cards, week navigation and This week.
-- Library drag placement and keyboard/touch Plan dialog. Existing CSS, icon assets, small spinner/check feedback and light/dark/system themes are reused. Theme choice persists in the browser and follows system changes.
+- Library drag placement and keyboard/touch Plan dialog. Existing CSS, icon assets, small spinner/check feedback and light/dark/system themes are reused. Theme choice is server-owned, shared across browser sessions, and follows system changes.
 - Placement snapshots the library meal and slot into a durable outbox transaction. Request IDs are UUIDs and unique primary keys. Repeated identical submissions reuse the operation; conflicting reuse is rejected.
 - Pending cards are temporary projections of outbox intent. Confirmed cards come from the provider, not saved outbox rows. A background worker validates Meals project ownership and the create acknowledgement before marking an operation saved. A check appears for two seconds, then disappears.
 - Failed operations stay pending with their error and exponential automatic retries capped at 30 seconds. The worker searches the placement request marker before create and preserves the original request ID on every attempt. The injectable provider contract requires idempotent create by request ID; the fake enforces this in its own durable SQLite table.
@@ -53,7 +54,7 @@ npm run build
 npm run smoke
 ```
 
-Tests initialize new synthetic Prisma databases under `/tmp`; they never read Python data or call Todoist. They prove restart durability, rollback, repeated/concurrent request idempotency, recovery after uncertain create, retry after pre-write failure, project ownership, provider authority, session expiry/logout, CSRF and Origin/host rejection. `npm run smoke` launches an isolated demo on **3100**, uses a randomly generated password without printing it, runs HTTP and desktop/mobile browser interactions, then cleans up. It uses `/usr/bin/google-chrome`; set `CHROME_PATH` to another installed Chromium executable if necessary.
+Tests initialize new synthetic Prisma databases under `TMPDIR` (set it to the scratch root above); they never read Python data or call Todoist. They prove restart durability, rollback, repeated/concurrent request idempotency, recovery after uncertain create, retry after pre-write failure, project ownership, provider authority, session expiry/logout, CSRF and Origin/host rejection. `npm run smoke` launches an isolated demo on **3100**, uses a randomly generated password without printing it, runs HTTP and desktop/mobile browser interactions, then cleans up. It uses `/usr/bin/google-chrome`; set `CHROME_PATH` to another installed Chromium executable if necessary.
 
 The production build emits `dist/client` and `dist/server/server.js`. Production Node hosting/container integration and deployment are deliberately outside this milestone; use the development command above to run this slice.
 
@@ -67,4 +68,13 @@ Current primary references consulted: [Prisma 8 SQLite runtime/config](https://w
 
 ## Subsequent slices
 
-Move/delete, manual retry controls for server outbox operations, slot/library management, settings Save/Revert, server-owned theme settings, history/reconciliation, live Todoist adapter, operational data migration, production hosting and deployment remain unimplemented. A real Todoist adapter must preserve stable `X-Request-Id` and a durable task description marker, resolve a scoped Meals project, and handle uncertain creates without duplicate writes; do not substitute an in-memory successful response. Future delete must treat success/404 as acknowledgement without an immediate GET.
+History/reconciliation, live Todoist adapter, actual operational data migration, production hosting and deployment remain for the next milestone. A real Todoist adapter must preserve stable `X-Request-Id` and a durable task description marker, resolve a scoped Meals project, and handle uncertain creates without duplicate writes; do not substitute an in-memory successful response. Future delete must treat success/404 as acknowledgement without an immediate GET.
+
+## Move/delete and Settings milestone
+
+- Planned cards support drag moves plus Move and Delete buttons. Each accepted operation snapshots a scoped task into durable outbox intent. Pending moves project the destination; pending deletes retain a dim card and small spinner. Errors expose a compact retry button, alongside automatic backoff. Browser-held uncertain HTTP intent preserves its request ID across reload; the board returns scoped received IDs to acknowledge even already-completed deletes.
+- The fake provider persists move/delete receipts independently from planner tables, supports delayed writes, pre-write errors and lost post-write responses. Missing-task delete is acknowledgement. The worker never follows a successful delete with an immediate provider GET; saved delete markers suppress stale list results.
+- `/settings` uses the accepted CSS layout, Appearance radio choices, library search/removal, slot labels/times, drag and button reorder, add/remove, and a baseline-aware Save/Revert form. Save has fixed 112px spinner/check/failure states. Failed saves keep the draft and baseline intact. Library removal never changes planned tasks; shuffle order persists server-side. Removing a slot leaves remote meals visible in “Other meals” with Move/Delete controls.
+- Slot saves require a matching revision and unique times. The slot replacement, order/revision and remote time intents commit together. Old-time aliases classify remote tasks temporarily while matching intents remain pending. To avoid conflicting intent, slot saves report an error while any meal write is pending; retry the save after synchronization.
+- Prisma adds only the `setting` table. For a disposable first-slice/demo DB, `npm run db:init` applies the additive table creation without deleting existing rows. Tests exercise this synthetic upgrade path. No Python or production data migration is included.
+- Additional fake scenarios: `FAKE_TODOIST_MOVE_FAIL_BEFORE=2` and `FAKE_TODOIST_DELETE_FAIL_BEFORE=2`. The browser smoke uses these and placement failures to exercise retry, and injects one synthetic Settings HTTP error to verify draft/failure/Revert behavior.

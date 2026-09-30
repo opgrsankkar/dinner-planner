@@ -1,10 +1,13 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useLocation } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { SettingsPage } from "../settings";
 import type { Board, Meal, Card, Slot } from "../types";
 export const Route = createFileRoute("/")({ component: Planner });
 type Intent = {
   requestId: string;
-  mealId: string;
+  mealId?: string;
+  taskId?: string;
+  kind?: "move" | "delete";
   slotId: string;
   date: string;
 };
@@ -30,7 +33,9 @@ function Icon({ name, spin = false }: { name: string; spin?: boolean }) {
     </svg>
   );
 }
-function Planner() {
+export function Planner() {
+  const settingsPage = useLocation().pathname === "/settings";
+  const [moving, setMoving] = useState<Card | null>(null);
   const [board, setBoard] = useState<Board | null>(null);
   const [signedOut, setSignedOut] = useState(false);
   const [error, setError] = useState("");
@@ -68,11 +73,15 @@ function Planner() {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error);
     const next = result as Board;
-    for (const card of next.cards) {
-      local.current.delete(card.requestId);
-      intents.current.delete(card.requestId);
+    for (const requestId of next.receivedRequests) {
+      local.current.delete(requestId);
+      intents.current.delete(requestId);
     }
     persistIntents();
+    next.cards = next.cards.filter(
+      (card) =>
+        ![...local.current.values()].some((local) => local.id === card.id),
+    );
     next.cards.push(...local.current.values());
     setBoard(next);
     setSignedOut(false);
@@ -100,9 +109,8 @@ function Planner() {
     return () => clearInterval(timer);
   }, [refresh]);
   useEffect(() => {
-    const value = localStorage.getItem("meal-planner-theme") ?? "system";
-    setTheme(value);
-  }, []);
+    if (board) setTheme(board.settings.theme);
+  }, [board?.settings.theme]);
   useEffect(() => {
     const media = matchMedia("(prefers-color-scheme: dark)");
     const apply = () => {
@@ -131,7 +139,7 @@ function Planner() {
       name: meal.name,
       date,
       time: slot.time,
-      projectId: "fake-meals-project",
+      projectId: board!.projectId,
       state: "pending",
       error: "",
       confirmedAt: 0,
@@ -155,7 +163,10 @@ function Planner() {
     const card = local.current.get(requestId);
     if (!intent || !card) return;
     try {
-      await post("/api/plan", intent);
+      await post(intent.kind ? "/api/change" : "/api/plan", intent);
+      local.current.delete(requestId);
+      intents.current.delete(requestId);
+      persistIntents();
       await refresh();
     } catch (e) {
       if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
@@ -170,6 +181,7 @@ function Planner() {
             },
         );
         setError(e.message);
+        await refresh();
         return;
       }
       // A lost HTTP acknowledgement is uncertain: retain ID and retry the exact intent.
@@ -187,6 +199,44 @@ function Planner() {
           },
       );
     }
+  }
+  async function change(
+    card: Card,
+    kind: "move" | "delete",
+    date = card.date,
+    slot?: Slot,
+  ) {
+    const requestId = crypto.randomUUID();
+    const pending: Card = {
+      ...card,
+      requestId,
+      state: "pending",
+      error: "",
+      confirmedAt: 0,
+      date,
+      time: slot?.time ?? card.time,
+      slotId: slot?.id ?? card.slotId,
+      deleting: kind === "delete",
+    };
+    intents.current.set(requestId, {
+      requestId,
+      taskId: card.id,
+      kind,
+      date,
+      slotId: slot?.id ?? "",
+    });
+    local.current.set(requestId, pending);
+    persistIntents();
+    setBoard(
+      (previous) =>
+        previous && {
+          ...previous,
+          cards: previous.cards.map((item) =>
+            item.id === card.id ? pending : item,
+          ),
+        },
+    );
+    await sendIntent(requestId);
   }
   const days = Array.from({ length: 7 }, (_, index) => {
     const date = new Date(`${week}T12:00:00Z`);
@@ -210,6 +260,7 @@ function Planner() {
     setWeek(iso(date));
   }
   function openPlan(meal: Meal) {
+    setMoving(null);
     setTarget(meal);
     setDay(week);
     setSlotId(board!.slots[0].id);
@@ -294,6 +345,13 @@ function Planner() {
           </button>
         </nav>
         <div className="top-actions">
+          <a
+            className="icon-button settings-link"
+            href={settingsPage ? "/" : "/settings"}
+            aria-label={settingsPage ? "Planner" : "Settings"}
+          >
+            <Icon name={settingsPage ? "calendar" : "settings"} />
+          </a>
           <button className="this-week" onClick={() => setWeek(monday())}>
             This week
           </button>
@@ -307,8 +365,9 @@ function Planner() {
                   : theme === "light"
                     ? "dark"
                     : "system";
-              setTheme(value);
-              localStorage.setItem("meal-planner-theme", value);
+              void post("/api/settings/theme", { theme: value })
+                .then(refresh)
+                .catch((e) => setError(e.message));
             }}
           >
             <Icon
@@ -340,199 +399,274 @@ function Planner() {
           </button>
         </div>
       </header>
-      <main className="app-layout">
-        <section className="planner-panel" aria-label="Weekly meal planner">
-          {error && (
-            <p className="error-banner" role="alert">
-              {error}
-              <button className="text-button" onClick={() => setError("")}>
-                Dismiss
-              </button>
-            </p>
-          )}
-          <div className="grid-scroll">
-            <table className="meal-grid" data-slot-count={board.slots.length}>
-              <caption className="visually-hidden">Weekly meal plan</caption>
-              <thead>
-                <tr>
-                  <th className="grid-corner" scope="col">
-                    <span className="visually-hidden">Meal slot</span>
-                  </th>
-                  {days.map((d) => (
-                    <th
-                      className={`day-header${d.iso === iso(new Date()) ? " is-today" : ""}`}
-                      scope="col"
-                      key={d.iso}
-                    >
-                      <div className="day-header-content">
-                        <span className="day-date">{d.label}</span>
-                        <span className="day-name">{d.name}</span>
-                        <span className="day-count">
-                          {board.cards.filter((c) => c.date === d.iso).length}
-                        </span>
-                      </div>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {board.slots.map((slot) => (
-                  <tr key={slot.id}>
-                    <th scope="row" className="slot-label">
-                      <div className="slot-label-content">
-                        <span>{slot.name}</span>
-                        <time>{slot.time}</time>
-                      </div>
+      {settingsPage ? (
+        <SettingsPage board={board} post={post} refresh={refresh} />
+      ) : (
+        <main className="app-layout">
+          <section className="planner-panel" aria-label="Weekly meal planner">
+            {error && (
+              <p className="error-banner" role="alert">
+                {error}
+                <button className="text-button" onClick={() => setError("")}>
+                  Dismiss
+                </button>
+              </p>
+            )}
+            <div className="grid-scroll">
+              <table className="meal-grid" data-slot-count={board.slots.length}>
+                <caption className="visually-hidden">Weekly meal plan</caption>
+                <thead>
+                  <tr>
+                    <th className="grid-corner" scope="col">
+                      <span className="visually-hidden">Meal slot</span>
                     </th>
                     {days.map((d) => (
-                      <td
-                        className="meal-cell"
+                      <th
+                        className={`day-header${d.iso === iso(new Date()) ? " is-today" : ""}`}
+                        scope="col"
                         key={d.iso}
-                        onDragOver={(e) => {
-                          if (
-                            e.dataTransfer.types.includes(
-                              "application/x-meal-library",
-                            )
-                          )
-                            e.preventDefault();
-                        }}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          const meal = board.library.find(
-                            (m) =>
-                              m.id ===
-                              e.dataTransfer.getData(
-                                "application/x-meal-library",
-                              ),
-                          );
-                          if (meal) void place(meal, d.iso, slot);
-                        }}
                       >
-                        <div className="meal-cell-content">
-                          {board.cards
-                            .filter(
-                              (c) => c.date === d.iso && c.time === slot.time,
-                            )
-                            .map((card) => (
-                              <div
-                                key={card.requestId || card.id}
-                                className={`meal-chip${card.state === "pending" ? " is-sync-pending" : ""}`}
-                              >
-                                <span className="meal-chip-name">
-                                  {card.name}
-                                </span>
-                                {card.state === "pending" ? (
-                                  <button
-                                    type="button"
-                                    className={`meal-sync-indicator${card.error ? " sync-indicator-failed" : ""}`}
-                                    disabled={
-                                      !intents.current.has(card.requestId)
-                                    }
-                                    aria-label={
-                                      card.error
-                                        ? `${card.error}${intents.current.has(card.requestId) ? " Retry placement" : " Will retry automatically"}`
-                                        : "Saving meal"
-                                    }
-                                    title={card.error || "Saving meal"}
-                                    onClick={() => {
-                                      void sendIntent(card.requestId);
-                                    }}
-                                  >
-                                    <Icon
-                                      name={card.error ? "alert" : "loader"}
-                                      spin={!card.error}
-                                    />
-                                  </button>
-                                ) : (
-                                  now - card.confirmedAt < 2000 && (
-                                    <span
-                                      className="meal-sync-indicator"
-                                      role="status"
-                                      aria-label="Meal saved"
-                                    >
-                                      <Icon name="check" />
-                                    </span>
-                                  )
-                                )}
-                              </div>
-                            ))}
+                        <div className="day-header-content">
+                          <span className="day-date">{d.label}</span>
+                          <span className="day-name">{d.name}</span>
+                          <span className="day-count">
+                            {board.cards.filter((c) => c.date === d.iso).length}
+                          </span>
                         </div>
-                      </td>
+                      </th>
                     ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-        <aside className="library-panel" aria-label="Meal library">
-          <div className="library-heading">
-            <h1>Meal library</h1>
-          </div>
-          <form
-            className="library-add-row"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              setBusy(true);
-              try {
-                await post("/api/library", { name: search });
-                setSearch("");
-                await refresh();
-              } catch (e) {
-                setError((e as Error).message);
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            <input
-              type="search"
-              placeholder="Search or type meal name…"
-              aria-label="Search or type a meal name"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            <button
-              className="add-meal-button"
-              disabled={busy || !search.trim()}
+                </thead>
+                <tbody>
+                  {[
+                    ...board.slots,
+                    ...(board.cards.some((card) => !card.slotId)
+                      ? [{ id: "unassigned", name: "Other meals", time: "" }]
+                      : []),
+                  ].map((slot) => (
+                    <tr key={slot.id}>
+                      <th scope="row" className="slot-label">
+                        <div className="slot-label-content">
+                          <span>{slot.name}</span>
+                          <time>{slot.time}</time>
+                        </div>
+                      </th>
+                      {days.map((d) => (
+                        <td
+                          className="meal-cell"
+                          key={d.iso}
+                          onDragOver={(e) => {
+                            if (
+                              e.dataTransfer.types.includes(
+                                "application/x-meal-library",
+                              ) ||
+                              e.dataTransfer.types.includes(
+                                "application/x-planned-meal",
+                              )
+                            )
+                              e.preventDefault();
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            const meal = board.library.find(
+                              (m) =>
+                                m.id ===
+                                e.dataTransfer.getData(
+                                  "application/x-meal-library",
+                                ),
+                            );
+                            if (slot.id === "unassigned") return;
+                            if (meal) void place(meal, d.iso, slot);
+                            const card = board.cards.find(
+                              (card) =>
+                                card.id ===
+                                e.dataTransfer.getData(
+                                  "application/x-planned-meal",
+                                ),
+                            );
+                            if (card && card.state === "saved")
+                              void change(card, "move", d.iso, slot);
+                          }}
+                        >
+                          <div className="meal-cell-content">
+                            {board.cards
+                              .filter(
+                                (c) =>
+                                  c.date === d.iso &&
+                                  (c.slotId === slot.id ||
+                                    (!c.slotId && slot.id === "unassigned")),
+                              )
+                              .map((card) => (
+                                <div
+                                  draggable={card.state === "saved"}
+                                  onDragStart={(e) =>
+                                    e.dataTransfer.setData(
+                                      "application/x-planned-meal",
+                                      card.id,
+                                    )
+                                  }
+                                  key={card.requestId || card.id}
+                                  className={`meal-chip${card.state === "pending" ? " is-sync-pending" : ""}${card.deleting ? " is-delete-pending" : ""}`}
+                                >
+                                  <span className="meal-chip-name">
+                                    {card.name}
+                                  </span>
+                                  {card.state === "saved" && (
+                                    <>
+                                      <button
+                                        className="card-action"
+                                        aria-label={`Move ${card.name}`}
+                                        onClick={() => {
+                                          setTarget(card);
+                                          setMoving(card);
+                                          setDay(card.date);
+                                          setSlotId(
+                                            card.slotId ?? board.slots[0].id,
+                                          );
+                                          dialog.current?.showModal();
+                                        }}
+                                      >
+                                        ↔
+                                      </button>
+                                      <button
+                                        className="card-action"
+                                        aria-label={`Delete ${card.name}`}
+                                        onClick={() =>
+                                          void change(card, "delete")
+                                        }
+                                      >
+                                        ×
+                                      </button>
+                                    </>
+                                  )}
+                                  {card.state === "pending" ? (
+                                    <button
+                                      type="button"
+                                      className={`meal-sync-indicator${card.error ? " sync-indicator-failed" : ""}`}
+                                      disabled={!card.error}
+                                      aria-label={
+                                        card.error
+                                          ? `Retry meal: ${card.error}`
+                                          : "Saving meal"
+                                      }
+                                      title={card.error || "Saving meal"}
+                                      onClick={() => {
+                                        if (intents.current.has(card.requestId))
+                                          void sendIntent(card.requestId);
+                                        else
+                                          void post("/api/retry", {
+                                            requestId: card.requestId,
+                                          })
+                                            .then(refresh)
+                                            .catch((e) => setError(e.message));
+                                      }}
+                                    >
+                                      <Icon
+                                        name={card.error ? "alert" : "loader"}
+                                        spin={!card.error}
+                                      />
+                                    </button>
+                                  ) : (
+                                    now - card.confirmedAt < 2000 && (
+                                      <span
+                                        className="meal-sync-indicator"
+                                        role="status"
+                                        aria-label="Meal saved"
+                                      >
+                                        <Icon name="check" />
+                                      </span>
+                                    )
+                                  )}
+                                </div>
+                              ))}
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <aside className="library-panel" aria-label="Meal library">
+            <div className="library-heading">
+              <h1>Meal library</h1>
+              <button
+                className="shuffle-button"
+                onClick={() =>
+                  void post("/api/library/shuffle", {})
+                    .then(refresh)
+                    .catch((e) => setError(e.message))
+                }
+              >
+                ⤨ Shuffle
+              </button>
+            </div>
+            <form
+              className="library-add-row"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setBusy(true);
+                try {
+                  await post("/api/library", { name: search });
+                  setSearch("");
+                  await refresh();
+                } catch (e) {
+                  setError((e as Error).message);
+                } finally {
+                  setBusy(false);
+                }
+              }}
             >
-              Add meal
-            </button>
-          </form>
-          <div className="library-list" role="list">
-            {board.library
-              .filter((meal) =>
-                meal.name.toLowerCase().includes(search.toLowerCase()),
-              )
-              .map((meal) => (
-                <div
-                  className="library-chip"
-                  role="listitem"
-                  key={meal.id}
-                  draggable
-                  onDragStart={(e) =>
-                    e.dataTransfer.setData(
-                      "application/x-meal-library",
-                      meal.id,
-                    )
-                  }
-                >
-                  <span className="drag-grip" aria-hidden="true">
-                    ⠿
-                  </span>
-                  <span className="library-chip-name">{meal.name}</span>
-                  <button
-                    className="library-plan-trigger"
-                    aria-label={`Plan ${meal.name}`}
-                    onClick={() => openPlan(meal)}
+              <input
+                type="search"
+                placeholder="Search or type meal name…"
+                aria-label="Search or type a meal name"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <button
+                className="add-meal-button"
+                disabled={busy || !search.trim()}
+              >
+                Add meal
+              </button>
+            </form>
+            <div className="library-list" role="list">
+              {board.library
+                .filter((meal) =>
+                  meal.name.toLowerCase().includes(search.toLowerCase()),
+                )
+                .map((meal) => (
+                  <div
+                    className="library-chip"
+                    role="listitem"
+                    key={meal.id}
+                    draggable
+                    onDragStart={(e) =>
+                      e.dataTransfer.setData(
+                        "application/x-meal-library",
+                        meal.id,
+                      )
+                    }
                   >
-                    Plan
-                  </button>
-                </div>
-              ))}
-          </div>
-        </aside>
-      </main>
+                    <span className="drag-grip" aria-hidden="true">
+                      ⠿
+                    </span>
+                    <span className="library-chip-name">{meal.name}</span>
+                    <button
+                      className="library-plan-trigger"
+                      aria-label={`Plan ${meal.name}`}
+                      onClick={() => openPlan(meal)}
+                    >
+                      Plan
+                    </button>
+                  </div>
+                ))}
+            </div>
+          </aside>
+        </main>
+      )}
       <dialog
         ref={dialog}
         className="confirm-dialog action-dialog"
@@ -544,15 +678,15 @@ function Planner() {
             e.preventDefault();
             if (target) {
               dialog.current?.close();
-              await place(
-                target,
-                day,
-                board.slots.find((s) => s.id === slotId)!,
-              );
+              const slot = board.slots.find((s) => s.id === slotId)!;
+              if (moving) await change(moving, "move", day, slot);
+              else await place(target, day, slot);
             }
           }}
         >
-          <h2 id="plan-title">Plan {target?.name}</h2>
+          <h2 id="plan-title">
+            {moving ? "Move" : "Plan"} {target?.name}
+          </h2>
           <p>
             Choose a day and meal slot. You can also drag meals on the planner.
           </p>
@@ -588,7 +722,9 @@ function Planner() {
             >
               Cancel
             </button>
-            <button className="primary-button">Plan meal</button>
+            <button className="primary-button">
+              {moving ? "Move meal" : "Plan meal"}
+            </button>
           </div>
         </form>
       </dialog>

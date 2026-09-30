@@ -20,10 +20,27 @@ export type Card = RemoteMeal & {
   state: "pending" | "saved";
   error: string;
   confirmedAt: number;
+  deleting?: boolean;
+  slotId?: string;
 };
 export type Board = {
   library: Meal[];
   slots: Slot[];
   cards: Card[];
   csrf: string;
+  settings: Settings;
+  receivedRequests: string[];
+  projectId: string;
+};
+
+export type Settings = {
+  theme: "system" | "light" | "dark";
+  slotOrder: string[];
+  libraryOrder: string[];
+  aliases: Record<string, string>;
+  revision: number;
+};
+export type Mutation = Placement & {
+  kind?: "move" | "delete";
+  taskId?: string;
 };

@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import type { Slot } from "../types";
 import { Store, Worker } from "./store";
 import { FakeTodoist } from "./todoist";
 import type { Todoist } from "./todoist";
@@ -28,6 +29,12 @@ export function app(): Promise<App> {
       resolve(process.env.FAKE_TODOIST_DB ?? ".local/fake-todoist.sqlite"),
     );
     todoist.delayMs = Number(process.env.FAKE_TODOIST_DELAY_MS ?? 1200);
+    todoist.moveFailBefore = Number(
+      process.env.FAKE_TODOIST_MOVE_FAIL_BEFORE ?? 0,
+    );
+    todoist.deleteFailBefore = Number(
+      process.env.FAKE_TODOIST_DELETE_FAIL_BEFORE ?? 0,
+    );
     todoist.failBefore = Number(process.env.FAKE_TODOIST_FAIL_BEFORE ?? 0);
     todoist.loseResponse = Number(process.env.FAKE_TODOIST_LOSE_RESPONSE ?? 0);
     const worker = new Worker(store, todoist);
@@ -121,14 +128,88 @@ export async function handle(
     }
     if (url.pathname === "/api/board" && request.method === "GET")
       return json({ ...(await store.board(todoist)), csrf: session.csrf });
+    if (
+      request.method === "POST" &&
+      [
+        "/api/change",
+        "/api/retry",
+        "/api/settings/slots",
+        "/api/settings/theme",
+        "/api/library/remove",
+        "/api/library/shuffle",
+      ].includes(url.pathname)
+    ) {
+      const body: unknown = await request.json();
+      if (!body || typeof body !== "object" || Array.isArray(body))
+        throw new Error("Invalid input");
+      const fields = body as Record<string, unknown>;
+      const string = (key: string) => {
+        const value = fields[key];
+        if (typeof value !== "string") throw new Error("Invalid " + key);
+        return value;
+      };
+      if (url.pathname === "/api/change") {
+        const kind = string("kind");
+        if (kind !== "move" && kind !== "delete")
+          throw new Error("Invalid action");
+        await store.change(
+          {
+            requestId: string("requestId"),
+            taskId: string("taskId"),
+            kind,
+            ...(kind === "move"
+              ? { slotId: string("slotId"), date: string("date") }
+              : {}),
+          },
+          todoist,
+        );
+      } else if (url.pathname === "/api/retry")
+        await store.retry(string("requestId"), todoist);
+      else if (url.pathname === "/api/settings/theme") {
+        const theme = string("theme");
+        if (theme !== "system" && theme !== "light" && theme !== "dark")
+          throw new Error("Invalid theme");
+        await store.saveTheme(theme);
+      } else if (url.pathname === "/api/library/remove")
+        await store.removeLibrary(string("mealId"));
+      else if (url.pathname === "/api/library/shuffle") await store.shuffle();
+      else {
+        if (
+          typeof fields.revision !== "number" ||
+          !Number.isInteger(fields.revision) ||
+          !Array.isArray(fields.slots)
+        )
+          throw new Error("Invalid slots");
+        const slots: Slot[] = fields.slots.map((value: unknown) => {
+          if (
+            !value ||
+            typeof value !== "object" ||
+            !("id" in value) ||
+            !("name" in value) ||
+            !("time" in value) ||
+            typeof value.id !== "string" ||
+            typeof value.name !== "string" ||
+            typeof value.time !== "string"
+          )
+            throw new Error("Invalid slot");
+          return { id: value.id, name: value.name, time: value.time };
+        });
+        await store.saveSlots(slots, fields.revision, todoist);
+      }
+      return json({ ok: true }, 202);
+    }
     if (url.pathname === "/api/library" && request.method === "POST") {
-      const body = (await request.json()) as { name?: unknown };
+      const raw: unknown = await request.json();
+      if (!raw || typeof raw !== "object") throw new Error("Invalid input");
+      const body = raw as { name?: unknown };
       if (typeof body.name !== "string")
         return json({ error: "Meal name required" }, 400);
       return json(await store.addLibrary(body.name));
     }
     if (url.pathname === "/api/plan" && request.method === "POST") {
-      const body = (await request.json()) as Record<string, unknown>;
+      const raw: unknown = await request.json();
+      if (!raw || typeof raw !== "object") throw new Error("Invalid input");
+      const body = raw as Record<string, unknown>;
       if (
         !["requestId", "mealId", "slotId", "date"].every(
           (key) => typeof body[key] === "string",

@@ -24,6 +24,9 @@ export const contract = defineContract({}, ({ field, model }) => ({
         confirmedAt: field.column(textColumn),
       },
     }).sql({ table: "outbox" }),
+    Setting: model("Setting", {
+      fields: { id: field.id.uuidv4String(), value: field.column(textColumn) },
+    }).sql({ table: "setting" }),
     Session: model("Session", {
       fields: {
         id: field.id.uuidv4String(),

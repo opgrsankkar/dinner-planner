@@ -41,6 +41,7 @@ async function fixture() {
     date: "2026-10-01",
   };
   const project = await provider.mealsProject();
+  let closed = false;
   return {
     store,
     provider,
@@ -50,6 +51,8 @@ async function fixture() {
     path,
     providerPath,
     async close() {
+      if (closed) return;
+      closed = true;
       await worker.stop();
       await store.close();
       provider.close();
@@ -337,6 +340,275 @@ test("login/session/logout, hostile hosts/origins, CSRF, expiry and wrong passwo
       expiresAt: "0",
     });
     assert.equal(await f.store.session(session.id), null);
+  } finally {
+    await f.close();
+  }
+});
+
+test("move and delete survive restart, retry stable IDs, and delete never reads afterward", async () => {
+  const f = await fixture();
+  try {
+    await f.store.place(f.input, f.project.id);
+    await f.worker.tick();
+    const task = (await f.provider.list(f.project.id))[0];
+    const slots = (await f.store.board(f.provider)).slots;
+    const move = {
+      requestId: randomUUID(),
+      taskId: task.id,
+      kind: "move" as const,
+      slotId: slots[1].id,
+      date: "2026-10-02",
+    };
+    await f.store.change(move, f.provider);
+    f.provider.loseResponse = 1;
+    await f.worker.tick();
+    assert.equal((await f.store.board(f.provider)).cards[0].state, "pending");
+    await f.store.retry(move.requestId, f.provider);
+    await f.worker.tick();
+    await f.store.change(move, f.provider);
+    assert.equal((await f.provider.list(f.project.id))[0].time, slots[1].time);
+    await assert.rejects(
+      f.store.change({ ...move, date: "2026-10-03" }, f.provider),
+      /another operation/,
+    );
+    const deletion = {
+      requestId: randomUUID(),
+      taskId: task.id,
+      kind: "delete" as const,
+    };
+    await f.store.change(deletion, f.provider);
+    await f.close();
+    const store = new Store(f.path),
+      provider = new FakeTodoist(f.providerPath);
+    provider.delayMs = 0;
+    const worker = new Worker(store, provider);
+    try {
+      provider.list = async () => {
+        throw new Error("DELETE acknowledgement must not trigger GET");
+      };
+      await worker.tick();
+      const op = await store.db.orm.Outbox.where({
+        id: deletion.requestId as `${string}-${string}-${string}-${string}-${string}`,
+      }).first();
+      assert.equal(op?.state, "saved");
+      // Repeated delete, including an absent task, is acknowledged idempotently.
+      await provider.delete(task.id, f.project.id, deletion.requestId);
+      await provider.delete(task.id, f.project.id, randomUUID());
+    } finally {
+      await worker.stop();
+      await store.close();
+      provider.close();
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test("slot save atomically records time intent, aliases, order and revision; library removal preserves planned task", async () => {
+  const f = await fixture();
+  try {
+    await f.store.place(f.input, f.project.id);
+    await f.worker.tick();
+    const original = await f.store.board(f.provider);
+    const slots = original.slots
+      .map((slot, index) =>
+        index === 0 ? { ...slot, name: "Morning", time: "08:15" } : slot,
+      )
+      .reverse();
+    await f.store.saveSlots(slots, 0, f.provider);
+    assert.deepEqual((await f.store.board(f.provider)).slots, slots);
+    assert.equal(
+      (await f.store.settings()).aliases[original.slots[0].time],
+      original.slots[0].id,
+    );
+    assert.equal(
+      (await f.provider.list(f.project.id))[0].time,
+      original.slots[0].time,
+    );
+    f.provider.failBefore = 1;
+    await f.worker.tick();
+    const pending = (await f.store.board(f.provider)).cards[0];
+    await assert.rejects(
+      f.store.saveSlots(slots, 1, f.provider),
+      /pending meals/,
+    );
+    assert.equal(pending.time, "08:15");
+    assert.ok(pending.error);
+    await f.store.retry(pending.requestId, f.provider);
+    await f.worker.tick();
+    assert.equal((await f.provider.list(f.project.id))[0].time, "08:15");
+    await assert.rejects(
+      f.store.saveSlots(slots, 0, f.provider),
+      /changed elsewhere/,
+    );
+    await assert.rejects(
+      f.store.saveSlots(
+        slots.map((slot) => ({ ...slot, time: "12:00" })),
+        1,
+        f.provider,
+      ),
+      /unique time/,
+    );
+    await f.store.removeLibrary(f.input.mealId);
+    assert.equal((await f.provider.list(f.project.id)).length, 1);
+    await f.store.shuffle();
+    const order = (await f.store.board(f.provider)).library.map(
+      (meal) => meal.id,
+    );
+    assert.deepEqual(order, (await f.store.settings()).libraryOrder);
+    await f.store.saveTheme("dark");
+    assert.equal((await f.store.board(f.provider)).settings.theme, "dark");
+  } finally {
+    await f.close();
+  }
+});
+
+test("move/delete ownership, pending exclusion, and missing delete acknowledgement", async () => {
+  const f = await fixture();
+  try {
+    await f.store.place(f.input, f.project.id);
+    await f.worker.tick();
+    const task = (await f.provider.list(f.project.id))[0];
+    await assert.rejects(
+      f.store.change(
+        { requestId: randomUUID(), taskId: randomUUID(), kind: "delete" },
+        f.provider,
+      ),
+      /belong/,
+    );
+    const requestId = randomUUID();
+    await f.store.change(
+      { requestId, taskId: task.id, kind: "delete" },
+      f.provider,
+    );
+    await assert.rejects(
+      f.store.change(
+        { requestId: randomUUID(), taskId: task.id, kind: "delete" },
+        f.provider,
+      ),
+      /pending/,
+    );
+    f.provider.mealsProject = async () => ({ id: "other", name: "Meals" });
+    await f.worker.tick();
+    assert.equal(f.provider.deleteCalls, 0);
+    await assert.rejects(f.store.retry(requestId, f.provider), /belong/);
+    f.provider.mealsProject = async () => f.project;
+    await f.provider.delete(task.id, f.project.id, randomUUID());
+    await f.store.retry(requestId, f.provider);
+    await f.worker.tick();
+    assert.equal((await f.store.board(f.provider)).cards.length, 0);
+  } finally {
+    await f.close();
+  }
+});
+
+test("additive initialization upgrades a synthetic first-slice database without losing outbox or library", async () => {
+  const f = await fixture();
+  await f.store.place(f.input, f.project.id);
+  await f.close();
+  const { DatabaseSync } = await import("node:sqlite");
+  const db = new DatabaseSync(f.path);
+  db.exec("DROP TABLE setting");
+  db.close();
+  execFileSync(
+    process.execPath,
+    ["node_modules/prisma/dist/prisma.js", "db", "init"],
+    { env: { ...process.env, PLANNER_DB: f.path }, stdio: "pipe" },
+  );
+  const store = new Store(f.path),
+    provider = new FakeTodoist(f.providerPath);
+  provider.delayMs = 0;
+  const worker = new Worker(store, provider);
+  try {
+    await store.seed();
+    assert.equal((await store.board(provider)).library.length, 3);
+    assert.equal(
+      (await store.board(provider)).cards[0].requestId,
+      f.input.requestId,
+    );
+    await worker.tick();
+    assert.equal((await store.board(provider)).cards[0].state, "saved");
+  } finally {
+    await worker.stop();
+    await store.close();
+    provider.close();
+  }
+});
+
+test("lost delete response retries the same durable receipt; stale listing cannot resurrect deleted card", async () => {
+  const f = await fixture();
+  try {
+    await f.store.place(f.input, f.project.id);
+    await f.worker.tick();
+    const task = (await f.provider.list(f.project.id))[0];
+    const requestId = randomUUID();
+    await f.store.change(
+      { requestId, taskId: task.id, kind: "delete" },
+      f.provider,
+    );
+    f.provider.loseResponse = 1;
+    await f.worker.tick();
+    assert.equal((await f.store.board(f.provider)).cards[0].deleting, true);
+    await f.store.retry(requestId, f.provider);
+    await f.worker.tick();
+    f.provider.list = async () => [task];
+    assert.equal((await f.store.board(f.provider)).cards.length, 0);
+    assert.ok(
+      (await f.store.board(f.provider)).receivedRequests.includes(requestId),
+    );
+    assert.equal(f.provider.deleteCalls, 2);
+  } finally {
+    await f.close();
+  }
+});
+
+test("move acknowledgement mismatch stays pending and remote task ownership is enforced", async () => {
+  const f = await fixture();
+  try {
+    await f.store.place(f.input, f.project.id);
+    await f.worker.tick();
+    const board = await f.store.board(f.provider),
+      task = board.cards[0];
+    const requestId = randomUUID();
+    await f.store.change(
+      {
+        requestId,
+        taskId: task.id,
+        kind: "move",
+        slotId: board.slots[1].id,
+        date: "2026-10-02",
+      },
+      f.provider,
+    );
+    const move = f.provider.move.bind(f.provider);
+    f.provider.move = async (input, id) => ({
+      ...(await move(input, id)),
+      projectId: "other-project",
+    });
+    await f.worker.tick();
+    assert.match(
+      (await f.store.board(f.provider)).cards[0].error,
+      /did not match move/,
+    );
+    await assert.rejects(
+      f.provider.delete(task.id, "other-project", randomUUID()),
+      /ownership/,
+    );
+    await assert.rejects(
+      move(
+        {
+          mealId: "",
+          name: task.name,
+          date: task.date,
+          time: task.time,
+          projectId: "other-project",
+          slotId: "",
+          taskId: task.id,
+        },
+        randomUUID(),
+      ),
+      /ownership/,
+    );
   } finally {
     await f.close();
   }
