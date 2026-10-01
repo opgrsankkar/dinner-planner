@@ -47,15 +47,24 @@ try {
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   await page.goto(server.resolvedUrls!.local[0]!);
-  const input = page.getByLabel("Add a meal", { exact: true });
-  const submit = page.getByRole("button", { name: "Add meal", exact: true });
+  const input = page.getByLabel("Search meals", { exact: true });
+  const submit = page.getByRole("button", { name: "＋ Add Meal", exact: true });
   const calls = () => page.evaluate(() => (window as any).calls);
   const release = () => page.evaluate(() => (window as any).release());
   await input.fill("   ");
-  assert.equal(await submit.isDisabled(), true);
+  assert.equal(await submit.isDisabled(), false);
   await input.press("Enter");
   assert.equal((await calls()).length, 0);
+  await expect(input).toHaveAttribute("aria-invalid", "true");
+  assert.equal(await input.evaluate(el => getComputedStyle(el).borderBottomColor), "rgb(180, 35, 53)");
+  await expect(page.locator('.folio-library')).not.toContainText('Enter a meal name');
+  await expect(page.locator('.folio-library')).not.toContainText('Save');
+  await expect(page.locator('.folio-library input')).toHaveCount(1);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  assert.equal(await input.evaluate(el => getComputedStyle(el).animationName), 'none');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
   await input.fill("  Lentil soup  ");
+  await expect(input).toHaveAttribute("aria-invalid", "false");
   await input.press("Enter");
   await page.getByRole("button", { name: "Adding…" }).waitFor();
   assert.equal(await input.isDisabled(), true);
@@ -82,12 +91,13 @@ try {
       await expect(page.getByRole("alert")).toHaveText("Synthetic failure");
     } else {
       await expect(page.getByRole("alert")).toHaveCount(0);
-      await expect(page.locator(".meal-library-add-feedback")).toHaveText("");
+      await expect(page.locator(".folio-library-feedback")).toHaveText("");
     }
-    await expect(page.locator(".manage-meal-name")).toHaveText(["Vegetable pasta", "Lentil soup"]);
+    await input.fill("");
+    await expect(page.locator(".folio-library-name")).toHaveText(["Vegetable pasta", "Lentil soup"]);
   }
-  await page.getByLabel("Find a meal").fill("PASTA");
-  assert.equal(await page.locator(".manage-meal-row").count(), 1);
+  await page.getByLabel("Search meals").fill("PASTA");
+  assert.equal(await page.locator(".folio-library-row").count(), 1);
   const remove = page.getByRole("button", {name: "Remove Vegetable pasta from library"});
   page.once("dialog", dialog => dialog.dismiss());
   await remove.click();
@@ -99,11 +109,20 @@ try {
   });
   await remove.click();
   await page.waitForFunction(() => (window as any).calls.length === 5);
+  await expect(remove).toBeDisabled();
+  assert.equal(await remove.evaluate(el => el.getBoundingClientRect().width), 44);
+  assert.equal(await remove.evaluate(el => el.getBoundingClientRect().height), 44);
   await release();
   await remove.waitFor({state: "detached"});
   assert.equal(await page.getByTestId("planned").textContent(), "Planned: Vegetable pasta");
+  await input.fill("Chickpea curry");
+  await submit.click();
+  await expect(input).toBeDisabled();
+  await release();
+  await expect(input).toHaveValue("");
+  await expect(page.locator('.folio-library-name')).toContainText(['Lentil soup', 'Chickpea curry']);
   await page.setViewportSize({width: 360, height: 800});
-  assert.ok(await page.locator(".meal-library-add-controls").evaluate(el => el.getBoundingClientRect().right <= window.innerWidth));
+  assert.ok(await page.locator(".folio-library-tools").evaluate(el => el.getBoundingClientRect().right <= window.innerWidth));
   assert.deepEqual(errors, []);
   console.log("Library settings smoke passed: trim/empty, Enter, pending duplicate guard, true-only clear/feedback, failure retention, search, confirmed removal, planned display preservation, mobile fit.");
 } finally {

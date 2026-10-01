@@ -1,53 +1,21 @@
-.meal-library-settings .meal-library-add {
-  margin-bottom: 1rem;
-}
-.meal-library-settings .meal-library-add-controls {
-  display: flex;
-  gap: 0.5rem;
-  align-items: stretch;
-}
-.meal-library-settings .meal-library-add-controls input {
-  flex: 1;
-  min-width: 0;
-  width: 100%;
-}
-.meal-library-settings .meal-library-add-controls button {
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-.meal-library-settings .meal-library-add-feedback {
-  font-size: 0.875rem;
-  margin-top: 0.35rem;
-  overflow-wrap: anywhere;
-}
-.meal-library-settings .meal-library-add-feedback:empty {
-  display: none;
-}
-.meal-library-settings .meal-library-add-controls input {
-  padding: 0.65rem 0.75rem;
-  border: 1px solid var(--line, #e5e9e3);
-  border-radius: 10px;
-  background: var(--surface, #fff);
-  color: var(--ink, #182520);
-}
-.meal-library-settings .meal-library-add-controls button {
-  padding: 0.65rem 0.85rem;
-  border: 0;
-  border-radius: 10px;
-  background: var(--green, #28794f);
-  color: var(--surface, #fff);
-  font-weight: 600;
-  cursor: pointer;
-}
-.meal-library-settings .meal-library-add-controls button:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-.meal-library-settings .meal-library-add-controls input:focus-visible,
-.meal-library-settings .meal-library-add-controls button:focus-visible {
-  outline: 3px solid var(--green, #28794f);
-  outline-offset: 2px;
-}
-.meal-library-settings .meal-library-add-feedback {
-  color: var(--green-dark, #1f603d);
-}
+.folio-library { color: var(--ink, #553449); font-family: 'Trebuchet MS', Arial, sans-serif; }
+.folio-library .folio-library-tools { display: flex; align-items: center; gap: 18px; margin: 0 0 6px; }
+.folio-library .folio-library-tools input { flex: 1; min-width: 0; width: 100%; border: 0; border-bottom: 1px solid currentColor; border-radius: 0; padding: 15px 0; background: transparent; color: inherit; font: inherit; font-size: 17px; box-shadow: none; }
+.folio-library .folio-library-tools input::placeholder { color: inherit; opacity: .7; }
+.folio-library .folio-library-add { flex-shrink: 0; min-height: 44px; padding: 11px 13px; background: var(--pink, #f5d9df); color: inherit; border: 1px solid currentColor; border-radius: 5px; box-shadow: 3px 3px 0 currentColor; font: inherit; font-size: 14px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.folio-library .folio-library-add:hover:enabled { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 currentColor; }
+.folio-library .folio-library-add:active:enabled { transform: translate(3px, 3px); box-shadow: none; }
+.folio-library .folio-library-row { display: flex; align-items: center; gap: 20px; padding: 27px 0; border-bottom: 1px dashed var(--line, #55344933); }
+.folio-library .folio-library-name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 23px; font-weight: 800; letter-spacing: -.5px; }
+.folio-library .folio-library-remove { display: grid; place-items: center; flex: 0 0 44px; width: 44px; height: 44px; padding: 10px; border: 1px solid currentColor; border-radius: 5px; box-shadow: 1px 1px 0 currentColor; background: transparent; color: inherit; cursor: pointer; }
+.folio-library .folio-library-remove svg { width: 22px; height: 22px; }
+.folio-library button:disabled { opacity: .55; cursor: default; }
+.folio-library :is(input, button):focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
+.folio-library .folio-library-tools input.folio-library-invalid { color: #b42335; border-bottom: 2px solid #b42335; outline-color: #b42335; animation: folio-library-wiggle .3s ease-in-out; }
+.folio-library .folio-library-feedback { font-size: 14px; margin-top: 12px; overflow-wrap: anywhere; }
+.folio-library .folio-library-feedback:empty { display: none; }
+.folio-library .folio-library-spinner { width: 16px; height: 16px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: folio-library-spin .8s linear infinite; }
+@keyframes folio-library-wiggle { 25%, 75% { transform: translateX(-4px); } 50% { transform: translateX(4px); } }
+@keyframes folio-library-spin { to { transform: rotate(360deg); } }
+@media (max-width: 700px) { .folio-library .folio-library-tools { gap: 10px; } .folio-library .folio-library-tools input { font-size: 16px; } .folio-library .folio-library-add { font-size: 13px; } .folio-library .folio-library-name { font-size: 21px; } }
+@media (prefers-reduced-motion: reduce) { .folio-library .folio-library-invalid, .folio-library .folio-library-spinner { animation: none !important; } }

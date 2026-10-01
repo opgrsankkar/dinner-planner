@@ -5,9 +5,9 @@ import { MealLibrarySettings } from "./settings/MealLibrarySettings";
 import { MealSlotSettings } from "./settings/MealSlotSettings";
 
 const sections = [
-  { id: "appearance", label: "Appearance", description: "Choose your color theme" },
-  { id: "library", label: "Meal library", description: "Manage your reusable meals" },
-  { id: "slots", label: "Meal slots", description: "Set meal times and order" },
+  { id: "appearance", label: "Appearance" },
+  { id: "library", label: "Meal library" },
+  { id: "slots", label: "Meal slots" },
 ] as const;
 type Section = (typeof sections)[number]["id"];
 
@@ -72,9 +72,10 @@ export function SettingsPage({
   }
   return (
     <main className="settings-shell">
-      <h1>Settings</h1>
+      <h1 className="settings-menu-title">Settings</h1>
       <div className={`settings-layout${active ? " has-active-section" : ""}`}>
         <nav className="settings-nav" aria-label="Settings sections" ref={navigation}>
+          <span className="folio-nav-dots" aria-hidden="true"><i /><i /><i /><i /><i /><i /></span>
           {sections.map((section) => (
             <button
               key={section.id}
@@ -85,7 +86,7 @@ export function SettingsPage({
               aria-controls={`settings-panel-${section.id}`}
               onClick={() => openSection(section.id)}
             >
-              <span><strong>{section.label}</strong><small>{section.description}</small></span>
+              <span><strong>{section.label}</strong></span>
               <span className="settings-nav-chevron" aria-hidden="true">›</span>
             </button>
           ))}
@@ -108,10 +109,12 @@ export function SettingsPage({
             />
           </div>
           <div id="settings-panel-library" hidden={active !== "library"}>
+            <div className="folio-section-heading"><h2>Meal library</h2><span aria-hidden="true">✦</span></div>
             <MealLibrarySettings library={board.library} action={action} />
           </div>
           <div id="settings-panel-slots" hidden={active !== "slots"}>
             <MealSlotSettings
+              active={active === "slots"}
               initialSlots={board.slots}
               initialRevision={board.settings.revision}
               post={post}
