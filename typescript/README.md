@@ -109,3 +109,23 @@ bwrap --ro-bind / / --bind "$runtime_scratch" "$runtime_scratch" \
   --setenv PRISMA_DISABLE_TELEMETRY 1 --chdir "$PWD/typescript" \
   node node_modules/prisma/dist/prisma.js db init
 ```
+
+Slot drag regression and review videos (isolated synthetic SQLite and fake Todoist,
+trusted Chromium CDP touch input on mobile and mouse input on desktop):
+
+```sh
+export PATH=/home/hermes-admin/.hermes/cache/scratch/dinner-node/node_modules/.bin:$PATH
+export TMPDIR=/home/hermes-admin/.hermes/cache/scratch
+npm run build
+npm run record:slots
+```
+
+Run from `typescript/`. The script selects a free loopback port, authenticates
+before recording, and asserts row/finger tracking and intermediate neighbor animation
+while the drag is held. It also verifies order, Save, reload persistence, Revert, touch
+cancellation preserving edited draft, page scrolling, button alternatives and input editing.
+Videos use fresh timestamped `mobile-motion-slot-reorder-*.webm` and
+`desktop-motion-slot-reorder-*.webm` filenames under
+`/home/hermes-admin/.hermes/cache/scratch/dinner-motion-slot-videos/` (override with
+`SLOT_VIDEO_DIR`; optional `SLOT_VIDEO_PORT` and `CHROME_PATH`). No live provider
+or existing database is used. Videos require user review before merge/deployment.
