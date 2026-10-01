@@ -10,12 +10,10 @@
 .folio-library .folio-library-remove { display: grid; place-items: center; flex: 0 0 44px; width: 44px; height: 44px; padding: 10px; border: 1px solid currentColor; border-radius: 5px; box-shadow: 1px 1px 0 currentColor; background: transparent; color: inherit; cursor: pointer; }
 .folio-library .folio-library-remove svg { width: 22px; height: 22px; }
 .folio-library button:disabled { opacity: .55; cursor: default; }
-.folio-library :is(input, button):focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
-.folio-library .folio-library-tools input.folio-library-invalid { color: #b42335; border-bottom: 2px solid #b42335; outline-color: #b42335; animation: folio-library-wiggle .3s ease-in-out; }
+.folio-library button:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
 .folio-library .folio-library-feedback { font-size: 14px; margin-top: 12px; overflow-wrap: anywhere; }
 .folio-library .folio-library-feedback:empty { display: none; }
 .folio-library .folio-library-spinner { width: 16px; height: 16px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: folio-library-spin .8s linear infinite; }
-@keyframes folio-library-wiggle { 25%, 75% { transform: translateX(-4px); } 50% { transform: translateX(4px); } }
 @keyframes folio-library-spin { to { transform: rotate(360deg); } }
 @media (max-width: 700px) { .folio-library .folio-library-tools { gap: 10px; } .folio-library .folio-library-tools input { font-size: 16px; } .folio-library .folio-library-add { font-size: 13px; } .folio-library .folio-library-name { font-size: 21px; } }
-@media (prefers-reduced-motion: reduce) { .folio-library .folio-library-invalid, .folio-library .folio-library-spinner { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .folio-library .folio-library-spinner { animation: none !important; } }
