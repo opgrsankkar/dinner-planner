@@ -215,6 +215,7 @@ try {
   );
   for (const preference of ["light", "dark"] as const) {
     await page.getByRole("link", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Appearance", exact: true }).click();
     await page.getByRole("radio", { name: /System/ }).click();
     await page.waitForFunction(() => !!document.querySelector<HTMLInputElement>('.theme-option input')?.checked);
     await page.waitForFunction(() => document.documentElement.dataset.theme ===
@@ -323,6 +324,7 @@ try {
     .filter({ hasText: "Browser smoke meal" })
     .waitFor({ state: "detached" });
   await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Meal slots", exact: true }).click();
   await page
     .getByRole("heading", { name: "Meal slots", exact: true })
     .waitFor();
@@ -392,6 +394,7 @@ try {
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await page.getByRole("button", { name: "Saved", exact: true }).waitFor();
   await page.reload();
+  await page.getByRole("button", { name: "Meal slots", exact: true }).click();
   await page.getByLabel("Slot label 2", { exact: true }).waitFor();
   assert.equal(
     await page.getByLabel("Slot label 2", { exact: true }).inputValue(),
@@ -412,6 +415,7 @@ try {
     "Morning",
   );
   await page.getByRole("button", { name: "Revert", exact: true }).click();
+  await page.getByRole("button", { name: "Meal library", exact: true }).click();
   page.once("dialog", (dialog) => dialog.accept());
   await page
     .getByRole("button", {
@@ -482,6 +486,7 @@ try {
     .filter({ hasText: "Dal & rice" })
     .waitFor({ state: "detached" });
   await mobilePage.getByRole("link", { name: "Settings", exact: true }).click();
+  await mobilePage.getByRole("button", { name: /Meal slots/ }).click();
   await mobilePage
     .getByLabel("Slot label 1", { exact: true })
     .fill("Mobile draft");

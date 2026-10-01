@@ -25,3 +25,26 @@
 .slot-edit-grip{touch-action:none;user-select:none}
 .slot-edit-row{position:relative}
 .slot-edit-row[data-dragging]{box-shadow:var(--shadow)}
+
+/* Settings navigation keeps section components mounted behind hidden panels. */
+.settings-shell{max-width:1000px}
+.settings-layout{display:grid;grid-template-columns:190px minmax(0,1fr);gap:22px;align-items:start}
+.settings-nav{display:grid;gap:6px}
+.settings-nav button{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;padding:12px 14px;border:1px solid transparent;border-radius:12px;background:transparent;color:var(--ink);text-align:left;cursor:pointer}
+.settings-nav strong{font:800 15px 'Nunito',sans-serif}
+.settings-nav small{display:none;color:var(--muted);font-size:12px;margin-top:4px}
+.settings-nav button:hover{background:var(--surface-2)}
+.settings-nav button[aria-current=page]{background:var(--green-soft);border-color:var(--green);color:var(--green-dark)}
+.settings-nav button:focus-visible,.settings-back:focus-visible{outline:2px solid var(--green);outline-offset:3px}
+.settings-nav-chevron{display:none;font-size:23px}
+.settings-panels{min-width:0}
+.settings-panels .settings-section{margin:0}
+.settings-back{display:none}
+@media(max-width:700px){
+.settings-layout{grid-template-columns:minmax(0,1fr);gap:0}
+.settings-nav{gap:9px}
+.settings-nav button{padding:15px;border-color:var(--line);background:var(--surface);box-shadow:var(--shadow)}
+.settings-nav small,.settings-nav-chevron{display:block}
+.settings-layout.has-active-section .settings-nav{display:none}
+.settings-back{display:inline-flex;margin-bottom:14px;font-size:13px}
+}
