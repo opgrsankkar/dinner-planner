@@ -1,0 +1,53 @@
+.meal-library-settings .meal-library-add {
+  margin-bottom: 1rem;
+}
+.meal-library-settings .meal-library-add-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+.meal-library-settings .meal-library-add-controls input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+}
+.meal-library-settings .meal-library-add-controls button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.meal-library-settings .meal-library-add-feedback {
+  font-size: 0.875rem;
+  margin-top: 0.35rem;
+  overflow-wrap: anywhere;
+}
+.meal-library-settings .meal-library-add-feedback:empty {
+  display: none;
+}
+.meal-library-settings .meal-library-add-controls input {
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line, #e5e9e3);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  color: var(--ink, #182520);
+}
+.meal-library-settings .meal-library-add-controls button {
+  padding: 0.65rem 0.85rem;
+  border: 0;
+  border-radius: 10px;
+  background: var(--green, #28794f);
+  color: var(--surface, #fff);
+  font-weight: 600;
+  cursor: pointer;
+}
+.meal-library-settings .meal-library-add-controls button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.meal-library-settings .meal-library-add-controls input:focus-visible,
+.meal-library-settings .meal-library-add-controls button:focus-visible {
+  outline: 3px solid var(--green, #28794f);
+  outline-offset: 2px;
+}
+.meal-library-settings .meal-library-add-feedback {
+  color: var(--green-dark, #1f603d);
+}
