@@ -28,7 +28,8 @@
  .folio-slots .slot-time { font-size:14px; }
  .folio-slots .slot-order-controls { opacity:1; }
 }
-@media(prefers-reduced-motion:reduce) { .folio-slots * { scroll-behavior:auto; transition:none!important; } }
+@media(prefers-reduced-motion:reduce) { .folio-slots * { scroll-behavior:auto; }
+ .folio-slots :not(input) { transition:none!important; } }
 /* Override the shared mobile editor's fixed tracks and narrow time field. */
 .folio-slots .slot-edit-row { grid-template-rows:auto; align-items:center; animation:none; }
 .folio-slots .slot-edit-row label:nth-of-type(1) { grid-column:2; grid-row:1; }
@@ -40,7 +41,7 @@
 .folio-slots .primary-button { background:var(--ink); color:var(--paper); border:1px solid var(--ink); border-radius:7px 10px 6px 8px; box-shadow:none; }
 .folio-slots .secondary-button { background:transparent; color:inherit; border:0; box-shadow:none; }
 .folio-slots .settings-save-actions .secondary-button { text-decoration:underline; text-underline-offset:4px; }
-.folio-slots button:focus-visible,.folio-slots input:focus-visible { outline:2px solid currentColor; outline-offset:3px; }
+.folio-slots button:focus-visible { outline:2px solid currentColor; outline-offset:3px; }
 .folio-slots .slot-settings-form { padding:0; border:0; border-radius:0; background:transparent; box-shadow:none; }
 .folio-slots .slot-edit-row label { color:inherit; }
 body.keyboard-navigation .folio-slots .slot-edit-row { grid-template-columns:48px minmax(0,1fr) 135px 44px; }
