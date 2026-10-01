@@ -20,3 +20,8 @@
 @media(max-width:560px){body.keyboard-navigation .slot-edit-row,.slot-edit-row.reorder-actions-open{grid-template-columns:52px minmax(0,1fr) 72px 34px}}
 
 .library-list{grid-auto-rows:minmax(min-content,auto);flex-shrink:0}.library-chip{height:auto;min-height:37px}.library-chip-name{white-space:normal;overflow-wrap:anywhere}.library-plan-trigger{flex-shrink:0}
+
+/* Pointer dragging belongs only to the slot handle; the rest of Settings scrolls normally. */
+.slot-edit-grip{touch-action:none;user-select:none}
+.slot-edit-row{position:relative}
+.slot-edit-row[data-dragging]{box-shadow:var(--shadow)}

@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Reorder, useDragControls } from "motion/react";
+import type { ReactNode } from "react";
 import type { Board, Slot } from "./types";
 export function SettingsPage({
   board,
@@ -181,33 +183,36 @@ export function SettingsPage({
             }
           }}
         >
-          <div className="slot-list">
+          <Reorder.Group as="div" axis="y" className="slot-list"
+            values={slots.map(slot => slot.id)}
+            onReorder={(ids: string[]) => {
+              if (saving) return;
+              setSlots(current => ids.map(id => current.find(slot => slot.id === id)!));
+              setState("idle");
+            }}>
+
             {slots.map((slot, index) => (
-              <div
+              <SlotReorderRow key={slot.id} id={slot.id}
                 className={`slot-edit-row${reordering === slot.id ? " reorder-actions-open" : ""}`}
-                key={slot.id}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  const from = e.dataTransfer.getData("application/x-slot");
-                  if (from) reorder(Number(from), index);
-                }}
-              >
+                begin={() => slots}
+                restore={setSlots}>
+                {(controls, suppressClick) => <>
                 <div className="slot-order-controls">
                   <button
                     type="button"
                     className="slot-edit-grip"
                     aria-label={`Reorder ${slot.name || "slot"}`}
-                    draggable={!saving}
-                    onClick={() =>
-                      setReordering(reordering === slot.id ? "" : slot.id)
-                    }
-                    onDragStart={(e) =>
-                      e.dataTransfer.setData(
-                        "application/x-slot",
-                        String(index),
-                      )
-                    }
+                    disabled={saving}
+                    onPointerDown={(e) => {
+                      if (e.isPrimary && e.button === 0 && !saving) {
+                        suppressClick.current = false;
+                        controls.start(e);
+                      }
+                    }}
+                    onClick={(e) => {
+                      if (suppressClick.current && e.detail > 0) { suppressClick.current = false; return; }
+                      setReordering(reordering === slot.id ? "" : slot.id);
+                    }}
                   >
                     ⠿
                   </button>
@@ -263,9 +268,10 @@ export function SettingsPage({
                 >
                   ×
                 </button>
-              </div>
+              </>}
+              </SlotReorderRow>
             ))}
-          </div>
+          </Reorder.Group>
           <div className="settings-actions">
             <button
               type="button"
@@ -323,4 +329,45 @@ export function SettingsPage({
       </p>
     </main>
   );
+}
+
+// Motion owns movement, crossing detection and layout animation. Keep only the
+// pre-gesture draft so a browser cancellation can undo tentative reordering.
+function SlotReorderRow({ id, className, begin, restore, children }: {
+  id: string;
+  className: string;
+  begin: () => Slot[];
+  restore: (slots: Slot[]) => void;
+  children: (controls: ReturnType<typeof useDragControls>, suppressClick: { current: boolean }) => ReactNode;
+}) {
+  const controls = useDragControls();
+  const snapshot = useRef<Slot[] | null>(null);
+  const suppressClick = useRef(false);
+  const [dragging, setDragging] = useState(false);
+  useEffect(() => {
+    const cancel = () => {
+      if (!snapshot.current) return;
+      controls.stop();
+      restore(snapshot.current);
+      snapshot.current = null;
+      setDragging(false);
+    };
+    window.addEventListener("pointercancel", cancel);
+    window.addEventListener("blur", cancel);
+    return () => {
+      window.removeEventListener("pointercancel", cancel);
+      window.removeEventListener("blur", cancel);
+    };
+  }, [controls, restore]);
+  return <Reorder.Item as="div" value={id} className={className}
+    data-slot-id={id} data-dragging={dragging || undefined}
+    dragListener={false} dragControls={controls}
+    onDragStart={() => {
+      snapshot.current = begin();
+      suppressClick.current = true;
+      setDragging(true);
+    }}
+    onDragEnd={() => { snapshot.current = null; setDragging(false); }}>
+    {children(controls, suppressClick)}
+  </Reorder.Item>;
 }
