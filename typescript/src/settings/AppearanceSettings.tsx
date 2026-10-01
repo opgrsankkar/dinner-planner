@@ -7,16 +7,13 @@ export interface AppearanceSettingsProps {
 
 export function AppearanceSettings({ theme: selectedTheme, onThemeChange }: AppearanceSettingsProps) {
   return (
-      <section className="settings-section">
-        <div className="settings-section-heading">
-          <div>
-            <h2>Appearance</h2>
-            <p>System follows your device.</p>
-          </div>
-        </div>
+    <section className="settings-section folio-appearance">
+      <div className="settings-section-heading"><h2>Appearance</h2></div>
+      <div className="folio-appearance-row">
+        <span className="folio-field-label">Color preference</span>
         <fieldset className="theme-options">
           <legend className="visually-hidden">Color theme</legend>
-          {(["system", "light", "dark"] as const).map((theme) => (
+          {(["light", "dark", "system"] as const).map((theme) => (
             <label className="theme-option" key={theme}>
               <input
                 type="radio"
@@ -24,17 +21,11 @@ export function AppearanceSettings({ theme: selectedTheme, onThemeChange }: Appe
                 checked={selectedTheme === theme}
                 onChange={() => void onThemeChange(theme)}
               />
-              <span>
-                <strong>{theme[0].toUpperCase() + theme.slice(1)}</strong>
-                <small>
-                  {theme === "system"
-                    ? "Use this device’s light or dark setting"
-                    : `Always use the ${theme} theme`}
-                </small>
-              </span>
+              <span><strong>{theme[0].toUpperCase() + theme.slice(1)}</strong></span>
             </label>
           ))}
         </fieldset>
-      </section>
+      </div>
+    </section>
   );
 }

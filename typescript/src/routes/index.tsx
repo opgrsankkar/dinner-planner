@@ -332,7 +332,7 @@ export function Planner() {
     );
   return (
     <>
-      <header className="topbar">
+      <header className={`topbar${settingsPage ? " settings-topbar" : ""}`}>
         <a className="brand" href="/">
           <span className="brand-mark">✦</span>
           <span>Meal Planner</span>
@@ -407,6 +407,7 @@ export function Planner() {
       ) : (
         <main className="app-layout">
           <section className="planner-panel" aria-label="Weekly meal planner">
+            <div className="folio-planner-heading"><h1>Weekly plan</h1><span aria-hidden="true">✦</span></div>
             {error && (
               <p className="error-banner" role="alert">
                 {error}
