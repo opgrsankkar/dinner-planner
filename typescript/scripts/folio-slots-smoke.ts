@@ -43,6 +43,26 @@ async function openSlots(page: Page) {
 async function checkOrder(page: Page, names: string[]) {
   await page.waitForFunction(names => JSON.stringify([...document.querySelectorAll<HTMLInputElement>('.slot-name')].map(input => input.value)) === JSON.stringify(names), names);
 }
+async function checkSlotRowLayout(page: Page) {
+  const rows = page.locator('.slot-edit-row');
+  assert.equal(await page.locator('.folio-slot-number').count(), 0, 'Meal slot rows have no visible numeric prefix');
+  for (const row of await rows.all()) {
+    const name = row.locator('.slot-name');
+    const time = row.locator('.slot-time');
+    const remove = row.locator('.remove-slot');
+    const [rowGrid, nameBox, timeBox, removeBox] = await Promise.all([
+      row.evaluate(el => getComputedStyle(el).gridTemplateColumns),
+      name.boundingBox(), time.boundingBox(), remove.boundingBox(),
+    ]);
+    assert.ok(rowGrid && rowGrid.split(' ').length === 3, `No empty number track: ${rowGrid}`);
+    assert.equal(await page.locator('.folio-slot-head').count(), 0, 'Visible headings remain removed');
+    assert.ok(nameBox && timeBox && removeBox, 'All row controls remain visible');
+    assert.ok(nameBox.x + nameBox.width <= timeBox.x + 2, 'Name and time do not overlap');
+    assert.ok(timeBox.x + timeBox.width <= removeBox.x + 2, 'Time and delete do not overlap');
+  }
+  assert.equal(await page.getByLabel('Slot label 1', { exact: true }).count(), 1, 'Accessible name label remains');
+  assert.equal(await page.getByLabel('Slot time 1', { exact: true }).count(), 1, 'Accessible time label remains');
+}
 try {
   let ready = false;
   for (let i = 0; i < 60; i++) {
@@ -83,6 +103,7 @@ try {
     assert.ok(await page.getByLabel('Slot label 1', { exact: true }).isVisible(), 'Slot name keeps its accessible field label');
     assert.ok(await page.getByLabel('Slot time 1', { exact: true }).isVisible(), 'Slot time keeps its accessible field label');
     await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
+    await checkSlotRowLayout(page);
     await page.waitForTimeout(500);
     const actionBoxes = await Promise.all(['+ Add slot', 'Save', 'Revert'].map(name => page.getByRole('button', { name, exact: true }).boundingBox()));
     assert.ok(actionBoxes.every(box => box && Math.abs(box.y - actionBoxes[0]!.y) < 3), 'All actions on one line');

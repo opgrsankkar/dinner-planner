@@ -4,19 +4,18 @@
 .folio-slots .settings-actions { display:flex; align-items:center; gap:18px; margin:0 0 28px; flex-wrap:nowrap; }
 .folio-slots .settings-save-actions { display:flex; gap:18px; }
 .folio-slots .slot-list { display:block; margin:0; padding:0; }
-.folio-slots .slot-edit-row { position:relative; display:grid; grid-template-columns:48px minmax(0,1fr) 135px 44px; gap:12px; min-height:104px; padding:0; border:0; border-bottom:1px dashed var(--line,var(--border)); border-radius:0; background:transparent; touch-action:pan-y; cursor:default; }
+.folio-slots .slot-edit-row { position:relative; display:grid; grid-template-columns:minmax(0,1fr) 135px 44px; gap:12px; min-height:104px; padding:0; border:0; border-bottom:1px dashed var(--line,var(--border)); border-radius:0; background:transparent; touch-action:pan-y; cursor:default; }
 .folio-slots .slot-edit-row label { min-width:0; margin:0; }
 .folio-slots .slot-edit-row input { width:100%; min-width:0; border:0; border-radius:0; background:transparent; color:inherit; box-shadow:none; padding:12px 0; touch-action:pan-y; cursor:text; }
 .folio-slots .slot-name { font-size:23px; letter-spacing:-.6px; }
 .folio-slots .slot-time { font-size:17px; font-variant-numeric:tabular-nums; }
 .folio-slots input[type=time]::-webkit-calendar-picker-indicator { display:none; }
-.folio-slots .folio-slot-number { font:22px 'Courier New',monospace; width:48px; text-align:center; border:0; background:none; }
 .folio-slots .remove-slot { width:44px; height:44px; min-width:44px; border:0; background:transparent; box-shadow:none; padding:10px; display:grid; place-items:center; color:inherit; }
+.folio-slots .slot-edit-row .remove-slot { grid-column:3; grid-row:1; }
 .folio-slots .remove-slot svg { width:24px; height:24px; }
 .folio-slots .slot-save-button { width:84px; }
 @media(max-width:700px) {
- .folio-slots .slot-edit-row { grid-template-columns:27px minmax(0,1fr) 112px 36px; gap:5px; }
- .folio-slots .folio-slot-number { width:27px; }
+ .folio-slots .slot-edit-row { grid-template-columns:minmax(0,1fr) 112px 36px; gap:5px; }
  .folio-slots .slot-name { font-size:18px; }
  .folio-slots .slot-time { font-size:14px; }
 }
@@ -24,8 +23,8 @@
  .folio-slots :not(input) { transition:none!important; } }
 /* Override the shared mobile editor's fixed tracks and narrow time field. */
 .folio-slots .slot-edit-row { grid-template-rows:auto; align-items:center; animation:none; }
-.folio-slots .slot-edit-row label:nth-of-type(1) { grid-column:2; grid-row:1; }
-.folio-slots .slot-edit-row label:nth-of-type(2) { grid-column:3; grid-row:1; }
+.folio-slots .slot-edit-row label:nth-of-type(1) { grid-column:1; grid-row:1; }
+.folio-slots .slot-edit-row label:nth-of-type(2) { grid-column:2; grid-row:1; }
 .folio-slots .slot-edit-row .slot-time { max-width:none; height:auto; padding:12px 0; font-size:17px; }
 .folio-slots .settings-save-actions .slot-save-button { order:-1; }
 @media(max-width:700px) { .folio-slots .slot-edit-row .slot-time { font-size:14px; } }
@@ -45,7 +44,7 @@
  .folio-slots .remove-slot { width:36px; min-width:36px; padding:6px; }
 }
 
-body.keyboard-navigation .folio-slots .slot-edit-row { grid-template-columns:48px minmax(0,1fr) 135px 44px; }
+body.keyboard-navigation .folio-slots .slot-edit-row { grid-template-columns:minmax(0,1fr) 135px 44px; }
 @media(max-width:700px) {
- body.keyboard-navigation .folio-slots .slot-edit-row { grid-template-columns:27px minmax(0,1fr) 112px 36px; }
+ body.keyboard-navigation .folio-slots .slot-edit-row { grid-template-columns:minmax(0,1fr) 112px 36px; }
 }
