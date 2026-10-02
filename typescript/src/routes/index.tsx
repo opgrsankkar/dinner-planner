@@ -333,10 +333,10 @@ export function Planner() {
   return (
     <>
       <header className={`topbar${settingsPage ? " settings-topbar" : ""}`}>
-        <a className="brand" href="/">
+        {!settingsPage && <a className="brand" href="/">
           <span className="brand-mark">✦</span>
           <span>Meal Planner</span>
-        </a>
+        </a>}
         {settingsPage ? (
           <a className="this-week" href="/">← Back to plan</a>
         ) : (
@@ -360,17 +360,10 @@ export function Planner() {
             </button>
           </nav>
         )}
-        <div className="top-actions">
-          {!settingsPage && <a
-            className="icon-button settings-link"
-            href="/settings"
-            aria-label="Settings"
-          >
-            <Icon name="settings" />
-          </a>}
-          {!settingsPage && <button className="this-week" onClick={() => setWeek(monday())}>
+        {!settingsPage && <div className="top-actions">
+          <button className="this-week" onClick={() => setWeek(monday())}>
             This week
-          </button>}
+          </button>
           <button
             className="icon-button theme-toggle"
             aria-label={`Switch to ${effectiveTheme === "dark" ? "light" : "dark"} theme`}
@@ -383,27 +376,24 @@ export function Planner() {
           >
             <Icon name={effectiveTheme === "dark" ? "moon" : "sun"} />
           </button>
-          <button
-            className="text-button"
-            onClick={async () => {
-              try {
-                await post("/api/logout", {});
-                local.current.clear();
-                intents.current.clear();
-                persistIntents();
-                setBoard(null);
-                setSignedOut(true);
-              } catch (e) {
-                setError((e as Error).message);
-              }
-            }}
+          <a
+            className="icon-button settings-link"
+            href="/settings"
+            aria-label="Settings"
           >
-            Log out
-          </button>
-        </div>
+            <Icon name="settings" />
+          </a>
+        </div>}
       </header>
       {settingsPage ? (
-        <SettingsPage board={board} post={post} refresh={refresh} />
+        <SettingsPage board={board} post={post} refresh={refresh} onLogout={async () => {
+          await post("/api/logout", {});
+          local.current.clear();
+          intents.current.clear();
+          persistIntents();
+          setBoard(null);
+          setSignedOut(true);
+        }} />
       ) : (
         <main className="app-layout">
           <section className="planner-panel" aria-label="Weekly meal planner">
