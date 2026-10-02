@@ -136,7 +136,6 @@ export function MealSlotSettings({ initialSlots, initialRevision, post, refresh,
                 layout={reduced ? false : "position"} initial={false}
                 exit={reduced ? undefined : { opacity: 0, height: 0, minHeight: 0 }}
                 transition={{ duration: reduced ? 0 : .4 }}>
-                <span className="folio-slot-number" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
                 <label>
                   <span className="visually-hidden">
                     Slot label {index + 1}

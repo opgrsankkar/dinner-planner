@@ -8,9 +8,9 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, mkdir, rm, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
-await mkdir('.local/issue20', { recursive: true });
-const directory = await mkdtemp(join(process.cwd(), '.local/issue20/slot-sort-'));
-const output = process.env.SLOT_VIDEO_DIR ?? join(process.cwd(), '.local/issue20/artifacts');
+await mkdir('.local/easy-comparison', { recursive: true });
+const directory = await mkdtemp(join(process.cwd(), '.local/easy-comparison/slot-sort-'));
+const output = process.env.SLOT_VIDEO_DIR ?? join(process.cwd(), '.local/easy-comparison/artifacts');
 await mkdir(output, { recursive: true });
 const password = randomUUID();
 const port = process.env.SLOT_VIDEO_PORT ?? await new Promise<string>((resolve, reject) => {
@@ -89,6 +89,32 @@ try {
     const breakfastId = seeded[0].id;
     const breakfast = page.locator(`[data-slot-id="${breakfastId}"]`);
     const lunch = page.locator(`[data-slot-id="${seeded[1].id}"]`);
+    // Issue #29: no visible ordinal or unused track, including after Tab.
+    async function checkSlotLayout() {
+      assert.equal(await page.locator('.folio-slot-number').count(), 0, 'No visible slot numbers');
+      assert.equal(await page.getByLabel('Slot label 1', { exact: true }).inputValue(), 'Breakfast');
+      assert.equal(await page.getByLabel('Slot time 1', { exact: true }).inputValue(), '08:00');
+      assert.deepEqual(await page.locator('.folio-slot-head span').allTextContents(), ['Name', 'Time', '']);
+      assert.ok(await page.locator('.folio-slots').evaluate(section => {
+        const head = section.querySelector('.folio-slot-head')!;
+        const headings = [...head.children].map(child => child.getBoundingClientRect());
+        return [...section.querySelectorAll('.slot-edit-row')].every(row => {
+          const box = row.getBoundingClientRect();
+          const fields = [...row.querySelectorAll('input, button')].map(field => field.getBoundingClientRect());
+          return getComputedStyle(row).gridTemplateColumns.split(' ').length === 3 &&
+            Math.abs(fields[0].left - box.left) < 1 &&
+            fields.every((field, index) => Math.abs(field.left - headings[index].left) < 1 &&
+              field.right <= box.right + 1 && field.width > 0 &&
+              Math.abs(field.top + field.height / 2 - (fields[0].top + fields[0].height / 2)) < 1) &&
+            fields[0].right <= fields[1].left && fields[1].right <= fields[2].left;
+        });
+      }), 'Three aligned name/time/delete columns without a leading gap');
+    }
+    await checkSlotLayout();
+    await breakfast.locator('.slot-name').focus();
+    await page.keyboard.press('Tab');
+    await checkSlotLayout();
+    assert.ok(await breakfast.locator('.slot-time').evaluate(input => document.activeElement === input), 'Tab reaches time after name');
     await page.screenshot({ path: join(output, `slots-${label}.png`), fullPage: true });
     // Capture actual intermediate layout transforms after the time edit.
     await page.evaluate(`
