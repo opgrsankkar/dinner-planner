@@ -48,6 +48,61 @@ export function Planner() {
   const [error, setError] = useState("");
   const [password, setPassword] = useState("");
   const [search, setSearch] = useState("");
+  const [libraryAdding, setLibraryAdding] = useState(false);
+  const [libraryInvalid, setLibraryInvalid] = useState(false);
+  const [libraryFeedback, setLibraryFeedback] = useState("");
+  const [libraryError, setLibraryError] = useState("");
+  const librarySubmitting = useRef(false);
+  const libraryInput = useRef<HTMLInputElement>(null);
+  const libraryAnimations = useRef<Animation[]>([]);
+  const libraryDragged = useRef(false);
+  useEffect(() => () => libraryAnimations.current.forEach(animation => animation.cancel()), []);
+
+  function animateLibraryInvalid(reset = false) {
+    const field = libraryInput.current;
+    if (!field) return;
+    const previousColor = getComputedStyle(field).color;
+    libraryAnimations.current.forEach(animation => animation.cancel());
+    const ink = getComputedStyle(field).color;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const red = document.documentElement.dataset.theme === "dark" ? "#ff8c9c" : "#b42335";
+    libraryAnimations.current = [field.animate([
+      { color: reset ? previousColor : red, offset: 0 },
+      { color: reset ? previousColor : red, offset: reset ? 0 : reduced ? 1 / 6 : .5, easing: "ease-out" },
+      { color: ink, offset: 1 },
+    ], { duration: reset ? 180 : reduced ? 240 : 600, easing: "linear" })];
+    if (!reset && !reduced) libraryAnimations.current.push(field.animate([
+      { transform: "translateX(0)" }, { transform: "translateX(-4px)" },
+      { transform: "translateX(4px)" }, { transform: "translateX(-4px)" },
+      { transform: "translateX(0)" },
+    ], { duration: 300, easing: "ease-in-out" }));
+  }
+
+  async function addLibraryMeal() {
+    if (librarySubmitting.current) return;
+    const trimmed = search.trim();
+    if (!trimmed) {
+      setLibraryInvalid(true);
+      animateLibraryInvalid();
+      libraryInput.current?.focus();
+      return;
+    }
+    librarySubmitting.current = true;
+    setLibraryAdding(true);
+    setLibraryFeedback("");
+    setLibraryError("");
+    try {
+      await post("/api/library", { name: trimmed });
+      setSearch("");
+      setLibraryFeedback(`Added ${trimmed} to the meal library.`);
+      await refresh();
+    } catch (error) {
+      setLibraryError(error instanceof Error ? error.message : "Could not add meal. Please try again.");
+    } finally {
+      librarySubmitting.current = false;
+      setLibraryAdding(false);
+    }
+  }
   const [week, setWeek] = useState(monday);
   const [target, setTarget] = useState<Meal | null>(null);
   const [day, setDay] = useState(week);
@@ -633,45 +688,51 @@ export function Planner() {
               <h1>Meal library</h1>
               <button
                 className="shuffle-button"
+                type="button"
+                aria-label="Shuffle meal library"
+                title="Shuffle meal library"
                 onClick={() =>
                   void post("/api/library/shuffle", {})
                     .then(refresh)
                     .catch((e) => setError(e.message))
                 }
               >
-                ⤨ Shuffle
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="m18 3 3 3-3 3M18 15l3 3-3 3M3 6h3c5 0 7 12 12 12h3M3 18h3c2 0 4-2 6-6s4-6 6-6h3" />
+                </svg>
               </button>
             </div>
             <form
               className="library-add-row"
-              onSubmit={async (e) => {
-                e.preventDefault();
-                setBusy(true);
-                try {
-                  await post("/api/library", { name: search });
-                  setSearch("");
-                  await refresh();
-                } catch (e) {
-                  setError((e as Error).message);
-                } finally {
-                  setBusy(false);
-                }
-              }}
+              onSubmit={(e) => { e.preventDefault(); void addLibraryMeal(); }}
             >
               <input
+                ref={libraryInput}
                 type="search"
+                aria-invalid={libraryInvalid}
+                disabled={libraryAdding}
                 placeholder="Search or type meal name…"
                 aria-label="Search or type a meal name"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setLibraryInvalid(false);
+                  animateLibraryInvalid(true);
+                  setLibraryFeedback("");
+                  setLibraryError("");
+                }}
               />
               <button
                 className="add-meal-button"
-                disabled={busy || !search.trim()}
+                type="submit"
+                disabled={libraryAdding}
               >
-                Add meal
+                {libraryAdding ? "Adding…" : "Add meal"}
               </button>
             </form>
+            <div className="library-feedback" role={libraryError ? "alert" : "status"}>
+              {libraryError || libraryFeedback}
+            </div>
             <div
               className="trash-drop-target"
               aria-label="Delete dragged planned meal"
@@ -703,36 +764,36 @@ export function Planner() {
             >
               <span aria-hidden="true">▤</span>
             </div>
-            <div className="library-list" role="list">
+            <div className="library-list">
               {board.library
                 .filter((meal) =>
-                  meal.name.toLowerCase().includes(search.toLowerCase()),
+                  meal.name.toLowerCase().includes(search.trim().toLowerCase()),
                 )
                 .map((meal) => (
-                  <div
+                  <button
                     className="library-chip"
-                    role="listitem"
+                    type="button"
+                    aria-label={`Plan ${meal.name}`}
+                    title={`Click to plan ${meal.name}, or drag to a calendar slot`}
                     key={meal.id}
                     draggable
-                    onDragStart={(e) =>
-                      e.dataTransfer.setData(
-                        "application/x-meal-library",
-                        meal.id,
-                      )
-                    }
+                    onPointerDown={() => { libraryDragged.current = false; }}
+                    onKeyDown={() => { libraryDragged.current = false; }}
+                    onDragStart={(e) => {
+                      libraryDragged.current = true;
+                      e.currentTarget.classList.add("is-dragging");
+                      e.dataTransfer.effectAllowed = "copy";
+                      e.dataTransfer.setData("application/x-meal-library", meal.id);
+                    }}
+                    onDragEnd={(e) => { e.currentTarget.classList.remove("is-dragging"); }}
+                    onClick={() => {
+                      if (libraryDragged.current) return;
+                      openPlan(meal);
+                    }}
                   >
-                    <span className="drag-grip" aria-hidden="true">
-                      ⠿
-                    </span>
+                    <span className="drag-grip" aria-hidden="true">⠿</span>
                     <span className="library-chip-name">{meal.name}</span>
-                    <button
-                      className="library-plan-trigger"
-                      aria-label={`Plan ${meal.name}`}
-                      onClick={() => openPlan(meal)}
-                    >
-                      Plan
-                    </button>
-                  </div>
+                  </button>
                 ))}
             </div>
           </aside>
