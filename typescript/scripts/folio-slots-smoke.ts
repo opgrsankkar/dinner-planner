@@ -1,4 +1,6 @@
 // Run after npm run build. Uses only an isolated synthetic DB and fake Todoist.
+// Responsive viewports 375/390/1280 use desktop keyboard time segments; separate
+// 375/390 mobile touch contexts cover picker controls and skip only partial typing.
 import { chromium, type Page, type BrowserContext } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
@@ -50,7 +52,11 @@ try {
   }
   assert.ok(ready, `Server failed: ${logs}`);
   browser = await chromium.launch({ executablePath: process.env.CHROME_PATH ?? '/usr/bin/google-chrome', args: ['--no-sandbox'] });
-  for (const width of [375, 390, 1280]) {
+  for (const { width, mobile } of [
+    { width: 375, mobile: false }, { width: 390, mobile: false }, { width: 1280, mobile: false },
+    { width: 375, mobile: true }, { width: 390, mobile: true },
+  ]) {
+    const label = `${width}${mobile ? "-mobile" : ""}`;
     const setup = await browser.newContext();
     const login = await setup.newPage();
     await login.goto(origin);
@@ -64,7 +70,9 @@ try {
     const storageState = await setup.storageState();
     await setup.close();
     const viewport = { width, height: width < 700 ? 844 : 900 };
-    const context: BrowserContext = await browser.newContext({ storageState, viewport, isMobile: width < 700, hasTouch: width < 700, recordVideo: { dir: output, size: viewport } });
+    // Use desktop native time segments at every responsive viewport: touch
+    // emulation substitutes a picker-only control that cannot be partially typed.
+    const context: BrowserContext = await browser.newContext({ storageState, viewport, isMobile: mobile, hasTouch: mobile, recordVideo: { dir: output, size: viewport } });
     const page: Page = await context.newPage();
     page.setDefaultTimeout(10000);
     const errors: string[] = [];
@@ -81,7 +89,7 @@ try {
     const breakfastId = seeded[0].id;
     const breakfast = page.locator(`[data-slot-id="${breakfastId}"]`);
     const lunch = page.locator(`[data-slot-id="${seeded[1].id}"]`);
-    await page.screenshot({ path: join(output, `slots-${width}.png`), fullPage: true });
+    await page.screenshot({ path: join(output, `slots-${label}.png`), fullPage: true });
     // Capture actual intermediate layout transforms after the time edit.
     await page.evaluate(`
       window.slotSamples = [];
@@ -103,19 +111,25 @@ try {
     await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
     assert.ok(await page.getByRole('button', { name: 'Save', exact: true }).isDisabled(), 'Duplicate time invalid');
     await page.getByRole('button', { name: 'Revert', exact: true }).click();
-    // Delete a native time segment, then edit another complete time. Neither
-    // may reorder while the partial native input reports an empty value.
-    await breakfast.locator('.slot-time').focus();
-    await page.keyboard.press('Home');
-    await page.keyboard.press('Backspace');
-    assert.equal(await breakfast.locator('.slot-time').inputValue(), '', 'Native partial time');
-    await lunch.locator('.slot-time').fill('07:00');
-    await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
-    assert.ok(await page.getByRole('button', { name: 'Save', exact: true }).isDisabled());
-    await breakfast.locator('.slot-time').fill('08:00');
-    await checkOrder(page, ['Lunch', 'Breakfast', 'Dinner']);
-    await page.getByRole('button', { name: 'Revert', exact: true }).click();
-    await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
+    if (!mobile) {
+      // Delete a native time segment, then edit another complete time. Neither
+      // may reorder while the partial native input reports an empty value.
+      await breakfast.locator('.slot-time').focus();
+      await page.keyboard.press('Home');
+      await page.keyboard.press('Backspace');
+      assert.equal(await breakfast.locator('.slot-time').inputValue(), '', 'Native partial time');
+      await lunch.locator('.slot-time').fill('07:00');
+      await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
+      assert.ok(await page.getByRole('button', { name: 'Save', exact: true }).isDisabled());
+      await breakfast.locator('.slot-time').fill('08:00');
+      await checkOrder(page, ['Lunch', 'Breakfast', 'Dinner']);
+      await page.getByRole('button', { name: 'Revert', exact: true }).click();
+      await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
+    } else {
+      // Mobile Chromium exposes a picker without keyboard hour/minute segments.
+      // Home/Backspace cannot create a partial value; all other checks still run.
+      console.log(`SKIP ${label}px native keyboard partial: mobile picker has no editable segments`);
+    }
     await page.getByRole('button', { name: '+ Add slot', exact: true }).click();
     const addedId = await page.locator('.slot-edit-row').last().getAttribute('data-slot-id');
     const added = page.locator(`[data-slot-id="${addedId}"]`);
@@ -139,7 +153,7 @@ try {
     assert.ok(await page.getByRole('button', { name: 'Revert', exact: true }).isDisabled());
     await page.getByRole('button', { name: 'Save failed', exact: true }).waitFor();
     assert.ok(await page.getByRole('button', { name: 'Save failed', exact: true }).isEnabled());
-    await page.screenshot({ path: join(output, `slots-${width}-retry.png`), fullPage: true });
+    await page.screenshot({ path: join(output, `slots-${label}-retry.png`), fullPage: true });
     await page.getByRole('button', { name: 'Save failed', exact: true }).click();
     await page.getByRole('button', { name: 'Saved', exact: true }).waitFor();
     await page.waitForTimeout(1100);
@@ -152,15 +166,15 @@ try {
     await breakfast.locator('.slot-time').fill('06:00');
     await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
     assert.ok(await page.locator('.slot-edit-row').evaluateAll(rows => rows.every(row => !((row as HTMLElement).style.transform) || (row as HTMLElement).style.transform === 'none')), 'Reduced motion uses immediate layout');
-    await page.screenshot({ path: join(output, `slots-${width}-reduced.png`), fullPage: true });
+    await page.screenshot({ path: join(output, `slots-${label}-reduced.png`), fullPage: true });
     await page.getByRole('button', { name: 'Revert', exact: true }).click();
     await checkOrder(page, ['Lunch', 'Dinner', 'Breakfast']);
     assert.deepEqual(errors, []);
     const video = page.video()!;
     await context.close();
-    const destination = join(output, `slots-${width}-chronological.webm`);
+    const destination = join(output, `slots-${label}-chronological.webm`);
     await rename(await video.path(), destination);
-    console.log(`PASS ${width}px: chronological animation, equal/partial times, add/remove, revert, save/retry/reload, reduced motion; ${destination}`);
+    console.log(`PASS ${label}px: chronological animation, equal times${mobile ? "" : ", native keyboard partial freeze"}, add/remove, revert, save/retry/reload, reduced motion; ${destination}`);
   }
 } finally {
   await browser?.close();
