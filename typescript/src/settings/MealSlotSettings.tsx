@@ -128,7 +128,6 @@ export function MealSlotSettings({ initialSlots, initialRevision, post, refresh,
 
             </div>
           </div>
-          <div className="folio-slot-head" aria-hidden="true"><span>Name</span><span>Time</span><span /></div>
           <div className="slot-list">
             <AnimatePresence initial={false}>
             {slots.map((slot, index) => (
