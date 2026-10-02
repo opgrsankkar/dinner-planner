@@ -59,20 +59,38 @@ try {
     const add = library.getByRole('button', { name: 'Add meal', exact: true });
     await expect(add).toBeEnabled();
     const ink = await field.evaluate(el => getComputedStyle(el).color);
-    await add.click();
-    await expect(field).toHaveAttribute('aria-invalid', 'true');
+    // Submit and capture in one browser task, before protocol latency can miss
+    // the red hold. Render intermediate wiggle frames by seeking the actual
+    // animation so CPU load cannot skip every visible movement frame.
     const cue = await field.evaluate(async el => {
-      const samples: { color: string; transform: string }[] = [];
-      for (let i = 0; i < 15; i++) {
-        await new Promise(resolve => requestAnimationFrame(resolve));
-        const style = getComputedStyle(el); samples.push({ color: style.color, transform: style.transform });
+      (el.closest('form')!.querySelector('button[type=submit]') as HTMLButtonElement).click();
+      const animations = el.getAnimations();
+      const keyframes = animations.map(animation => animation.effect?.getKeyframes() ?? []);
+      const initialColor = getComputedStyle(el).color;
+      const wiggle = animations.find(animation => animation.effect?.getKeyframes().some(frame => frame.transform !== undefined));
+      const transforms: string[] = [];
+      if (wiggle) {
+        wiggle.pause();
+        const duration = Number(wiggle.effect!.getTiming().duration);
+        for (const fraction of [.25, .5, .75]) {
+          wiggle.currentTime = duration * fraction;
+          transforms.push(getComputedStyle(el).transform);
+        }
+        wiggle.currentTime = 0;
+        wiggle.play();
       }
-      return samples;
+      await Promise.all(animations.map(animation => animation.finished));
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      return { keyframes, initialColor, transforms, finalColor: getComputedStyle(el).color, finalTransform: getComputedStyle(el).transform };
     });
-    assert.ok(cue.some(sample => sample.color === 'rgb(180, 35, 53)'), 'Empty Add renders red');
-    assert.ok(cue.some(sample => sample.transform !== 'none'), 'Empty Add wiggles');
-    await page.waitForTimeout(650);
-    assert.equal(await field.evaluate(el => getComputedStyle(el).color), ink, 'Red resets untouched');
+    await expect(field).toHaveAttribute('aria-invalid', 'true');
+    assert.equal(cue.initialColor, 'rgb(180, 35, 53)', 'Empty Add renders red immediately');
+    assert.ok(cue.keyframes.some(frames => frames.some(frame => frame.color === '#b42335' || frame.color === 'rgb(180, 35, 53)')), 'Empty Add has red animation keyframe');
+    assert.ok(cue.keyframes.some(frames => frames.some(frame => frame.transform === 'translateX(-4px)')
+      && frames.some(frame => frame.transform === 'translateX(4px)')), 'Empty Add has both wiggle directions');
+    assert.ok(cue.transforms.length === 3 && cue.transforms.every(transform => transform !== 'none' && transform !== 'matrix(1, 0, 0, 1, 0, 0)'), 'Empty Add renders actual intermediate wiggle frames');
+    assert.equal(cue.finalColor, ink, 'Red resets untouched after animation finishes');
+    assert.equal(cue.finalTransform, 'none', 'Wiggle resets after animation finishes');
     await add.click(); await page.waitForTimeout(50); await add.click();
     await expect(field).toHaveAttribute('aria-invalid', 'true');
     await field.fill('Typing resets active feedback');
