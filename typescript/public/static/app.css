@@ -96,7 +96,7 @@ html[data-theme=dark]{--paper:#352b32;--rail:#2a2328;--cream:#4d3b46;--pink:#664
 .library-chip,.library-chip:nth-child(n){background:transparent;border:0;border-bottom:1px dashed var(--line);border-radius:0;padding:16px 0;font-size:16px;font-weight:700;animation:none}
 .library-chip:hover{box-shadow:none;transform:none;filter:none}
 .library-plan-trigger{opacity:1;pointer-events:auto;padding:5px 8px}
-.library-add-row{grid-template-columns:minmax(0,1fr);gap:12px}
+.library-add-row{grid-template-columns:minmax(0,1fr) auto;gap:12px}
 .library-add-row input{background:transparent;border:0;border-bottom:1px solid var(--ink);border-radius:0;padding:0;font-size:15px}
 .add-meal-button{min-height:38px;justify-self:start}
 .shuffle-button{font-size:12px;padding:9px}
