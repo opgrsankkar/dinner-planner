@@ -5,15 +5,37 @@
 .folio-library .folio-library-add { flex-shrink: 0; min-height: 44px; padding: 11px 13px; background: var(--pink, #f5d9df); color: inherit; border: 1px solid currentColor; border-radius: 5px; box-shadow: 3px 3px 0 currentColor; font: inherit; font-size: 14px; font-weight: 700; white-space: nowrap; cursor: pointer; }
 .folio-library .folio-library-add:hover:enabled { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 currentColor; }
 .folio-library .folio-library-add:active:enabled { transform: translate(3px, 3px); box-shadow: none; }
-.folio-library .folio-library-row { display: flex; align-items: center; gap: 20px; padding: 27px 0; border-bottom: 1px dashed var(--line, #55344933); }
+.folio-library .folio-library-hint { margin: 5px 0 0; font-size: 12px; opacity: .72; }
+.folio-library .folio-library-row { --swipe-offset: 0px; position: relative; display: flex; align-items: stretch; min-height: 88px; overflow: hidden; border-bottom: 1px dashed var(--line, #55344933); touch-action: pan-y; }
+.folio-library .folio-library-action { position: absolute; z-index: 1; top: 0; bottom: 0; display: grid; place-items: center; width: 88px; padding: 24px; border: 0; color: white; opacity: 0; cursor: pointer; transition: opacity 140ms ease; }
+.folio-library .folio-library-action svg { width: 24px; height: 24px; }
+.folio-library .folio-library-edit { left: 0; background: #3776c5; }
+.folio-library .folio-library-delete { right: 0; background: #c94f5d; }
+.folio-library .folio-library-content { position: relative; z-index: 2; display: flex; align-items: center; width: 100%; min-width: 0; padding: 20px 0; background: var(--paper, #fffaf6); transform: translateX(var(--swipe-offset)); transition: transform 180ms ease; }
+.folio-library .folio-library-row.is-revealed-delete .folio-library-content { --swipe-offset: -88px; }
+.folio-library .folio-library-row.is-revealed-edit .folio-library-content { --swipe-offset: 88px; }
+.folio-library .folio-library-row:hover:not(.is-editing):not(.is-revealed-delete):not(.is-revealed-edit) .folio-library-content,
+.folio-library .folio-library-row:focus-within:not(.is-editing):not(.is-revealed-delete):not(.is-revealed-edit) .folio-library-content { width: calc(100% - 176px); margin-inline: 88px; }
+.folio-library .folio-library-row.is-revealed-delete .folio-library-content,
+.folio-library .folio-library-row.is-revealed-edit .folio-library-content { width: 100%; margin-inline: 0; }
+.folio-library .folio-library-row.is-revealed-delete .folio-library-delete,
+.folio-library .folio-library-row.is-revealed-edit .folio-library-edit,
+.folio-library .folio-library-row:hover .folio-library-action,
+.folio-library .folio-library-row:focus-within .folio-library-action { opacity: 1; }
+.folio-library .folio-library-row.is-swiping .folio-library-content { transition: none; }
+.folio-library .folio-library-row.is-swiping .folio-library-action { opacity: 1; }
 .folio-library .folio-library-name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 23px; font-weight: 800; letter-spacing: -.5px; }
-.folio-library .folio-library-remove { display: grid; place-items: center; flex: 0 0 44px; width: 44px; height: 44px; padding: 10px; border: 1px solid currentColor; border-radius: 5px; box-shadow: 1px 1px 0 currentColor; background: transparent; color: inherit; cursor: pointer; }
-.folio-library .folio-library-remove svg { width: 22px; height: 22px; }
+.folio-library .folio-library-edit-form { display: flex; align-items: center; gap: 8px; width: 100%; }
+.folio-library .folio-library-edit-form input { flex: 1; min-width: 0; border: 0; border-bottom: 1px solid currentColor; border-radius: 0; padding: 9px 0; background: transparent; color: inherit; font: inherit; font-size: 17px; }
+.folio-library .folio-library-save, .folio-library .folio-library-cancel { min-height: 40px; padding: 8px 10px; border: 1px solid currentColor; border-radius: 4px; background: var(--pink, #f5d9df); color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
+.folio-library .folio-library-cancel { background: transparent; }
 .folio-library button:disabled { opacity: .55; cursor: default; }
-.folio-library button:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
+.folio-library button:focus-visible, .folio-library input:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
 .folio-library .folio-library-feedback { font-size: 14px; margin-top: 12px; overflow-wrap: anywhere; }
 .folio-library .folio-library-feedback:empty { display: none; }
 .folio-library .folio-library-spinner { width: 16px; height: 16px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: folio-library-spin .8s linear infinite; }
+.folio-library .folio-library-row.is-hinting:first-child .folio-library-content { animation: folio-library-hint 2.2s ease-in-out both; }
 @keyframes folio-library-spin { to { transform: rotate(360deg); } }
-@media (max-width: 700px) { .folio-library .folio-library-tools { gap: 10px; } .folio-library .folio-library-tools input { font-size: 16px; } .folio-library .folio-library-add { font-size: 13px; } .folio-library .folio-library-name { font-size: 21px; } }
-@media (prefers-reduced-motion: reduce) { .folio-library .folio-library-spinner { animation: none !important; } }
+@keyframes folio-library-hint { 0%, 100% { transform: translateX(0); } 18%, 36% { transform: translateX(-18px); } 54%, 72% { transform: translateX(18px); } }
+@media (max-width: 700px) { .folio-library .folio-library-tools { gap: 10px; } .folio-library .folio-library-tools input { font-size: 16px; } .folio-library .folio-library-add { font-size: 13px; } .folio-library .folio-library-name { font-size: 21px; } .folio-library .folio-library-edit-form { gap: 5px; } .folio-library .folio-library-save, .folio-library .folio-library-cancel { padding-inline: 7px; } }
+@media (prefers-reduced-motion: reduce) { .folio-library .folio-library-spinner { animation: none !important; } .folio-library .folio-library-row.is-hinting:first-child .folio-library-content { animation: none !important; } .folio-library .folio-library-content, .folio-library .folio-library-action { transition: none !important; } }

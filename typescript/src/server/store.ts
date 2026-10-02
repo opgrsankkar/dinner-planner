@@ -317,6 +317,22 @@ export class Store {
       this.db.orm.Library.where({ id: id(mealId) }).delete(),
     );
   }
+  async renameLibrary(mealId: string, rawName: string) {
+    if (!uuidPattern.test(mealId)) throw new Error("Invalid meal ID");
+    const name = rawName.trim().replace(/\s+/g, " ");
+    if (!name || name.length > 120)
+      throw new Error("Use a meal name between 1 and 120 characters");
+    return this.write(() => this.db.transaction(async (tx) => {
+      const meal = await tx.orm.Library.where({ id: id(mealId) }).first();
+      if (!meal) throw new Error("Meal no longer exists");
+      const duplicate = (await tx.orm.Library.all()).find((candidate) =>
+        candidate.id !== meal.id && candidate.name.toLowerCase() === name.toLowerCase(),
+      );
+      if (duplicate) throw new Error("A meal with that name already exists");
+      await tx.orm.Library.where({ id: meal.id }).update({ name });
+      return { ...meal, name };
+    }));
+  }
   async shuffle() {
     return this.write(async () => {
       const order = (await this.db.orm.Library.all()).map((meal) => meal.id);
