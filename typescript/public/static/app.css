@@ -253,8 +253,8 @@ html .folio-slots .slot-edit-row input:focus {
 .library-chip:active{cursor:grabbing}
 .library-chip:focus-visible,.shuffle-button:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
 .library-chip .drag-grip{font-size:16px}
-.library-heading .shuffle-button{flex:0 0 48px;width:48px;height:48px;min-width:48px;min-height:48px;padding:9px;display:grid;place-items:center}
-.library-heading .shuffle-button svg{display:block;width:28px;height:28px}
+.library-actions .shuffle-button{flex:0 0 48px;width:48px;height:48px;min-width:48px;min-height:48px;padding:9px;display:grid;place-items:center}
+.library-actions .shuffle-button svg{display:block;width:28px;height:28px}
 .library-feedback{margin:0 0 12px;font-size:13px;overflow-wrap:anywhere}
 .library-feedback:empty{display:none}
 .library-feedback[role=alert]{color:#b42335}
