@@ -425,7 +425,8 @@ test("slot save atomically records time intent, aliases, order and revision; lib
       )
       .reverse();
     await f.store.saveSlots(slots, 0, f.provider);
-    assert.deepEqual((await f.store.board(f.provider)).slots, slots);
+    assert.deepEqual((await f.store.board(f.provider)).slots, [...slots].reverse());
+    assert.deepEqual((await f.store.settings()).slotOrder, [...slots].reverse().map(slot => slot.id));
     assert.equal(
       (await f.store.settings()).aliases[original.slots[0].time],
       original.slots[0].id,

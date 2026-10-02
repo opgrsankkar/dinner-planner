@@ -1,11 +1,11 @@
 .folio-slots { color:var(--ink, var(--text)); }
 .folio-slots h2 { text-align:center; font-family:'Liberation Sans Narrow','Arial Narrow',Arial,sans-serif; font-size:36px; font-weight:900; letter-spacing:-.7px; margin-bottom:28px; }
 .folio-slots .slot-settings-form { display:block; }
-.folio-slots .settings-actions { display:flex; align-items:center; gap:18px; margin:0 0 28px; flex-wrap:wrap; }
+.folio-slots .settings-actions { display:flex; align-items:center; gap:18px; margin:0 0 28px; flex-wrap:nowrap; }
 .folio-slots .settings-save-actions { display:flex; gap:18px; }
 .folio-slots .slot-list { display:block; margin:0; padding:0; }
 .folio-slots .folio-slot-head { display:grid; grid-template-columns:minmax(0,1fr) 135px 44px; font-size:12px; letter-spacing:.04em; padding-bottom:14px; }
-.folio-slots .slot-edit-row { position:relative; display:grid; grid-template-columns:48px minmax(0,1fr) 135px 44px; gap:12px; min-height:104px; padding:0; border:0; border-bottom:1px dashed var(--line,var(--border)); border-radius:0; background:transparent; touch-action:pan-y; cursor:grab; }
+.folio-slots .slot-edit-row { position:relative; display:grid; grid-template-columns:48px minmax(0,1fr) 135px 44px; gap:12px; min-height:104px; padding:0; border:0; border-bottom:1px dashed var(--line,var(--border)); border-radius:0; background:transparent; touch-action:pan-y; cursor:default; }
 .folio-slots .slot-edit-row label { min-width:0; margin:0; }
 .folio-slots .slot-edit-row input { width:100%; min-width:0; border:0; border-radius:0; background:transparent; color:inherit; box-shadow:none; padding:12px 0; touch-action:pan-y; cursor:text; }
 .folio-slots .slot-name { font-size:23px; letter-spacing:-.6px; }
@@ -14,19 +14,13 @@
 .folio-slots .folio-slot-number { font:22px 'Courier New',monospace; width:48px; text-align:center; border:0; background:none; }
 .folio-slots .remove-slot { width:44px; height:44px; min-width:44px; border:0; background:transparent; box-shadow:none; padding:10px; display:grid; place-items:center; color:inherit; }
 .folio-slots .remove-slot svg { width:24px; height:24px; }
-.folio-slots .slot-order-controls { position:absolute; left:0; bottom:4px; display:flex; gap:2px; opacity:0; }
-.folio-slots .slot-edit-row:hover .slot-order-controls,.folio-slots .slot-edit-row:focus-within .slot-order-controls { opacity:1; }
-.folio-slots .slot-order-step { display:block; width:24px; height:24px; padding:0; border:0; background:transparent; color:inherit; font-size:14px; }
-.folio-slots [data-dragging] { z-index:3; background:var(--paper,var(--surface)); box-shadow:0 8px 14px #55344920; cursor:grabbing; }
-.folio-slots [data-dragging],.folio-slots [data-dragging] * { user-select:none!important; -webkit-user-select:none!important; }
-.folio-slots .slot-save-button { width:112px; }
+.folio-slots .slot-save-button { width:84px; }
 @media(max-width:700px) {
- .folio-slots .slot-edit-row { grid-template-columns:27px minmax(0,1fr) 88px 44px; gap:5px; }
- .folio-slots .folio-slot-head { grid-template-columns:minmax(0,1fr) 88px 44px; }
+ .folio-slots .slot-edit-row { grid-template-columns:27px minmax(0,1fr) 112px 36px; gap:5px; }
+ .folio-slots .folio-slot-head { grid-template-columns:minmax(0,1fr) 112px 36px; }
  .folio-slots .folio-slot-number { width:27px; }
  .folio-slots .slot-name { font-size:18px; }
  .folio-slots .slot-time { font-size:14px; }
- .folio-slots .slot-order-controls { opacity:1; }
 }
 @media(prefers-reduced-motion:reduce) { .folio-slots * { scroll-behavior:auto; }
  .folio-slots :not(input) { transition:none!important; } }
@@ -35,7 +29,6 @@
 .folio-slots .slot-edit-row label:nth-of-type(1) { grid-column:2; grid-row:1; }
 .folio-slots .slot-edit-row label:nth-of-type(2) { grid-column:3; grid-row:1; }
 .folio-slots .slot-edit-row .slot-time { max-width:none; height:auto; padding:12px 0; font-size:17px; }
-.folio-slots .slot-order-controls { width:48px; grid-column:auto; grid-row:auto; }
 .folio-slots .settings-save-actions .slot-save-button { order:-1; }
 @media(max-width:700px) { .folio-slots .slot-edit-row .slot-time { font-size:14px; } }
 .folio-slots .primary-button { background:var(--ink); color:var(--paper); border:1px solid var(--ink); border-radius:7px 10px 6px 8px; box-shadow:none; }
@@ -44,6 +37,17 @@
 .folio-slots button:focus-visible { outline:2px solid currentColor; outline-offset:3px; }
 .folio-slots .slot-settings-form { padding:0; border:0; border-radius:0; background:transparent; box-shadow:none; }
 .folio-slots .slot-edit-row label { color:inherit; }
+
+/* Keep all actions and the complete native time segments visible at 375px. */
+@media(max-width:700px) {
+ .folio-slots .settings-actions { gap:8px; justify-content:flex-start; }
+ .folio-slots .settings-save-actions { gap:8px; flex-shrink:0; }
+ .folio-slots .settings-actions button { padding-inline:10px; white-space:nowrap; }
+ .folio-slots .settings-actions > button { flex-shrink:0; }
+ .folio-slots .remove-slot { width:36px; min-width:36px; padding:6px; }
+}
+
 body.keyboard-navigation .folio-slots .slot-edit-row { grid-template-columns:48px minmax(0,1fr) 135px 44px; }
-body.keyboard-navigation .folio-slots .slot-order-controls { width:48px; }
-@media(max-width:700px) { body.keyboard-navigation .folio-slots .slot-edit-row { grid-template-columns:27px minmax(0,1fr) 88px 44px; } }
+@media(max-width:700px) {
+ body.keyboard-navigation .folio-slots .slot-edit-row { grid-template-columns:27px minmax(0,1fr) 112px 36px; }
+}

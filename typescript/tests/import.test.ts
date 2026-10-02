@@ -58,10 +58,10 @@ test("legacy import preserves backup, library IDs/order/uniqueness, theme, alias
       );
       assert.deepEqual(
         board.slots.map((slot) => slot.name),
-        ["Lunch", "Breakfast"],
+        ["Breakfast", "Lunch"],
       );
       assert.equal(board.settings.theme, "dark");
-      assert.equal(board.settings.aliases["08:00"], board.slots[1].id);
+      assert.equal(board.settings.aliases["08:00"], board.slots[0].id);
       const duplicate = await store.addLibrary("  dOsA  ");
       assert.equal(duplicate.id, f.first);
       const metadata = board.settings as typeof board.settings & {
@@ -74,7 +74,7 @@ test("legacy import preserves backup, library IDs/order/uniqueness, theme, alias
         metadata.legacyImport.slots.filter((slot) => slot.active === 0).length,
         1,
       );
-      assert.equal(metadata.legacyImport.slotIds.breakfast, board.slots[1].id);
+      assert.equal(metadata.legacyImport.slotIds.breakfast, board.slots[0].id);
     } finally {
       await store.close();
       provider.close();

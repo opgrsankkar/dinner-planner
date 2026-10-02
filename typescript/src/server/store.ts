@@ -1,3 +1,4 @@
+import { sortSlotsByTime } from "../slot-order";
 import sqlite from "@prisma/orm-sqlite/runtime";
 import type { DefaultModelRow } from "@prisma/orm-sqlite/orm-client";
 import type { Contract } from "../prisma/contract";
@@ -272,7 +273,7 @@ export class Store {
           )
           .map((row) => row.id),
         library: sort(await this.db.orm.Library.all(), settings.libraryOrder),
-        slots: sort(slots, settings.slotOrder),
+        slots: sortSlotsByTime(sort(slots, settings.slotOrder)),
         cards,
       };
     });
@@ -442,6 +443,7 @@ export class Store {
       new Set(slots.map((slot) => slot.time)).size !== slots.length
     )
       throw new Error("Every slot needs a name and unique time");
+    slots = sortSlotsByTime(slots);
     const project = await todoist.mealsProject();
     if (project.name !== "Meals") throw new Error("Meals project unavailable");
     return this.write(async () => {
