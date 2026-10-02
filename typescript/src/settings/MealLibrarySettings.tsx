@@ -106,7 +106,6 @@ export function MealLibrarySettings({ library, action }: MealLibrarySettingsProp
           {adding ? "Adding…" : "＋ Add Meal"}
         </button>
       </form>
-      <p className="folio-library-hint">Swipe right to edit, left to delete. Or focus a meal and Tab to its actions.</p>
       <div className="folio-library-list">
         {library.filter(meal => meal.name.toLowerCase().includes(search.trim().toLowerCase())).map(meal => (
           <SwipeMealRow key={meal.id} meal={meal} hint={meal.id === library[0]?.id}

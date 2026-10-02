@@ -17,7 +17,6 @@
 @keyframes folio-library-spin { to { transform: rotate(360deg); } }
 @media (max-width: 700px) { .folio-library .folio-library-tools { gap: 10px; } .folio-library .folio-library-tools input { font-size: 16px; } .folio-library .folio-library-add { font-size: 13px; } .folio-library .folio-library-name { font-size: 21px; } }
 @media (prefers-reduced-motion: reduce) { .folio-library .folio-library-spinner { animation: none !important; } }
-.folio-library .folio-library-hint { font-size: 13px; opacity: .8; }
 .folio-library .folio-library-row { position: relative; display: block; padding: 0; overflow: hidden; }
 .folio-library .folio-library-surface { position: relative; min-height: 98px; display: flex; align-items: center; padding: 27px 0; background: var(--paper, #fff4e6); touch-action: pan-y; transition: transform .18s ease-out; }
 .folio-library .folio-library-swipe-action { position: absolute; top: 50%; transform: translateY(-50%); width: 56px; height: 56px; border: 0; border-radius: 5px; box-shadow: none; padding: 15px; color: white; display: grid; place-items: center; cursor: pointer; }

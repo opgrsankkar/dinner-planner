@@ -1,4 +1,4 @@
-// After npm run build: node --import tsx scripts/issues-library-smoke.ts
+// After npm run build: node --import tsx scripts/issue-33-browser.ts
 // Uses only an isolated synthetic DB and fake Todoist.
 import { chromium, expect } from '@playwright/test';
 import { spawn } from 'node:child_process';
@@ -34,7 +34,7 @@ server.stdout.on('data', c => logs += c);
 server.stderr.on('data', c => logs += c);
 let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
 
-const artifacts = join(process.cwd(), '.local', 'comparison');
+const artifacts = process.env.FEEDBACK_ARTIFACTS ?? join(process.cwd(), '.local', 'feedback', 'issue-33');
 await mkdir(artifacts, { recursive: true });
 try {
   let ready = false;
@@ -49,13 +49,48 @@ try {
     const context = await browser.newContext({ viewport: { width, height: 900 }, hasTouch: width < 500, isMobile: width < 500 });
     const page = await context.newPage(); const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
+    const diagnostics: unknown[] = [];
+    async function snapshot(label: string) {
+      diagnostics.push(await page.evaluate(label => ({
+        label, time: performance.now(), scrollY,
+        focus: document.activeElement?.outerHTML,
+        events: (window as unknown as { libraryTouchEvents: unknown[] }).libraryTouchEvents,
+        viewport: { scale: visualViewport?.scale, offsetTop: visualViewport?.offsetTop },
+        rows: [...document.querySelectorAll('.folio-library-row')].map(row => ({
+          id: row.getAttribute('data-meal-id'), reveal: row.getAttribute('data-reveal'),
+          editing: row.classList.contains('is-editing'), name: row.querySelector('.folio-library-name')?.textContent,
+          transform: getComputedStyle(row.querySelector('.folio-library-surface')!).transform,
+          animations: row.querySelector('.folio-library-surface')!.getAnimations().length,
+          focusVisible: row.matches(':focus-visible'),
+          pointerEvents: getComputedStyle(row.querySelector('.folio-library-surface')!).pointerEvents,
+          rect: row.getBoundingClientRect().toJSON(),
+        })),
+      }), label));
+    }
+    await page.addInitScript(() => {
+      const events: unknown[] = [];
+      Object.assign(window, { libraryTouchEvents: events });
+      for (const type of ['scroll', 'scrollend', 'touchstart', 'touchend', 'touchcancel', 'pointerdown', 'pointerup', 'pointercancel', 'mousedown', 'mouseup', 'click', 'focusin'])
+        document.addEventListener(type, event => {
+          const target = event.target instanceof Element ? event.target : document.documentElement;
+          if (!['scroll', 'scrollend', 'mousedown', 'mouseup', 'click'].includes(type) && !target.closest('.folio-library')) return;
+          events.push({ type, time: performance.now(), trusted: event.isTrusted,
+            scrollY, defaultPrevented: event.defaultPrevented, action: target.closest('button')?.getAttribute('aria-label'),
+            target: target.outerHTML.slice(0, 500), id: target.closest('[data-meal-id]')?.getAttribute('data-meal-id') });
+        }, true);
+    });
+    try {
     await page.goto(origin); await page.getByLabel('Password', { exact: true }).fill(password);
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    // Clicking submits asynchronously; fixture mutations require the authenticated board.
+    await expect(page.getByRole('link', { name: 'Settings', exact: true })).toBeVisible();
     if (width === 1280 && theme === 'light') await page.evaluate(async () => {
-      const board = await (await fetch('/api/board')).json();
+      const response = await fetch('/api/board');
+      if (!response.ok) throw new Error(`Fixture board failed: ${response.status}`);
+      const board = await response.json();
       for (let i = 0; i < 12; i++) {
         const response = await fetch('/api/library', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': board.csrf }, body: JSON.stringify({ name: `Scroll test meal ${i}` }) });
-        if (!response.ok) throw new Error('Synthetic fixture setup failed');
+        if (!response.ok) throw new Error(`Synthetic fixture setup failed: ${response.status} ${await response.text()}`);
       }
     });
     await page.getByRole('link', { name: 'Settings', exact: true }).click();
@@ -93,7 +128,17 @@ try {
       await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(scrollBefore);
       assert.equal(mutations, 0); await swipe(80);
       await expect.poll(() => first.locator('.folio-library-surface').evaluate(el => getComputedStyle(el).transform)).toBe('matrix(1, 0, 0, 1, 56, 0)');
-      await first.getByRole('button', { name: `Edit ${name}`, exact: true }).tap();
+      await snapshot('before Edit tap');
+      const edit = first.getByRole('button', { name: `Edit ${name}`, exact: true });
+      await expect(edit).toBeVisible();
+      const box = (await edit.boundingBox())!;
+      const x = box.x + box.width / 2, y = box.y + box.height / 2;
+      assert.equal(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('button')?.getAttribute('aria-label'), { x, y }), `Edit ${name}`);
+      await edit.tap();
+      await snapshot('after Edit tap');
+      await expect.poll(() => page.evaluate(name => (window as unknown as {
+        libraryTouchEvents: { type: string; trusted: boolean; action: string }[];
+      }).libraryTouchEvents.some(event => event.type === 'click' && event.trusted && event.action === `Edit ${name}`), name)).toBe(true);
     } else {
       await first.hover(); assert.equal(await first.locator('.folio-library-surface').evaluate(el => getComputedStyle(el).pointerEvents), 'none');
       await page.mouse.move(0, 0); await first.focus(); await page.keyboard.press('ArrowRight');
@@ -106,7 +151,24 @@ try {
     await page.route('**/api/library/rename', route => route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"Synthetic rename failure"}' }));
     await draft.press('Enter'); await expect(draft).toBeEnabled(); await expect(draft).toHaveValue(renamed);
     await expect(page.getByText('Synthetic rename failure', { exact: true })).toBeVisible(); await page.unroute('**/api/library/rename');
-    await draft.fill(`  ${renamed}  `); await draft.press('Enter'); await expect(first.locator('.folio-library-name')).toHaveText(renamed);
+    // Hold the real rename request while another row is edited. Saving is local
+    // to the first row; a polling refresh must not discard the second draft.
+    let releaseRename!: () => void;
+    const renameGate = new Promise<void>(resolve => { releaseRename = resolve; });
+    await page.route('**/api/library/rename', async route => { await renameGate; await route.continue(); });
+    try {
+      const request = page.waitForRequest(req => req.method() === 'POST' && req.url().endsWith('/api/library/rename'));
+      await draft.fill(`  ${renamed}  `); await draft.press('Enter'); await request;
+      await expect(draft).toBeDisabled();
+      const otherId = await rows.nth(1).getAttribute('data-meal-id');
+      const other = library.locator(`[data-meal-id="${otherId}"]`);
+      await other.getByRole('button', { name: /^Edit / }).focus(); await page.keyboard.press('Enter');
+      const otherDraft = other.getByRole('textbox'); await expect(otherDraft).toBeEnabled();
+      await otherDraft.fill('Unsaved second row');
+      releaseRename(); await expect(first.locator('.folio-library-name')).toHaveText(renamed);
+      await expect(otherDraft).toBeEnabled(); await expect(otherDraft).toHaveValue('Unsaved second row');
+      await otherDraft.press('Escape'); await expect(otherDraft).toHaveCount(0);
+    } finally { releaseRename(); await page.unroute('**/api/library/rename'); }
     assert.equal(await first.getAttribute('data-meal-id'), mealId);
     await page.reload(); await page.getByRole('button', { name: 'Meal library', exact: true }).click();
     const updated = library.locator(`[data-meal-id="${mealId}"]`); await expect(updated.locator('.folio-library-name')).toHaveText(renamed);
@@ -128,13 +190,21 @@ try {
     await expect(library.getByRole('searchbox')).toBeEnabled(); await expect(library.getByRole('searchbox')).toHaveValue('Keep add draft'); await page.unroute('**/api/library');
     await page.emulateMedia({ reducedMotion: 'reduce' }); await page.reload(); await page.getByRole('button', { name: 'Meal library', exact: true }).click();
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme); await page.waitForTimeout(600);
-    await expect(library.locator('.folio-library-hint')).toBeVisible();
+    await expect(library.locator('.folio-library-hint')).toHaveCount(0);
+    await expect(library).not.toContainText('Swipe right to edit, left to delete.');
+    await expect(rows.first()).toHaveAttribute('aria-label', /Swipe right to edit, left to delete\. Use Tab for actions\./);
     assert.equal(await rows.first().locator('.folio-library-surface').evaluate(el => el.getAnimations().length), 0);
     assert.equal(await rows.first().locator('.folio-library-surface').evaluate(el => getComputedStyle(el).transitionDuration), '0s');
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     await page.screenshot({ path: join(artifacts, `settings-${width}-${theme}-reduced.png`), fullPage: true }); assert.deepEqual(errors, []);
-    console.log(`PASS ${width}/${theme}: intro, explicit actions, keyboard/confirmation, rename reload identity polling/reorder, add/error drafts, reduced motion, no overflow${width < 500 ? ', CDP touch left/right/short/cancel/vertical' : ', hover'}`);
-    await context.close();
+    console.log(`PASS ${width}/${theme}: intro, explicit actions, keyboard/confirmation, rename reload identity polling/reorder, row-local pending save, add/error drafts, reduced motion, no overflow${width < 500 ? ', CDP touch left/right/short/cancel/vertical' : ', hover'}`);
+    await writeFile(join(artifacts, `diagnostics-${width}-${theme}.json`), JSON.stringify({ snapshots: diagnostics, events: await page.evaluate(() => (window as unknown as { libraryTouchEvents: unknown[] }).libraryTouchEvents) }, null, 2));
+    } catch (error) {
+      await snapshot('failure');
+      await page.screenshot({ path: join(artifacts, `failure-${width}-${theme}.png`), fullPage: true });
+      await writeFile(join(artifacts, `failure-${width}-${theme}.json`), JSON.stringify({ error: String(error), snapshots: diagnostics, events: await page.evaluate(() => (window as unknown as { libraryTouchEvents: unknown[] }).libraryTouchEvents) }, null, 2));
+      throw error;
+    } finally { await context.close(); }
   }
 } finally {
   await browser?.close(); server.kill('SIGTERM');
