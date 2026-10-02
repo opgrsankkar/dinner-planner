@@ -80,6 +80,19 @@ try {
     await page.goto(`${origin}/settings`);
     await openSlots(page);
     await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
+    assert.equal(await page.locator('.folio-slot-head').count(), 0, 'No Name/Time column heading row');
+    assert.equal(await page.locator('.folio-slots').getByText(/^(Name|Time)$/).count(), 0, 'No visible column labels');
+    assert.ok(await page.getByRole('heading', { name: 'Meal slots', exact: true }).isVisible());
+    assert.deepEqual(await page.locator('.folio-slot-number').allTextContents(), ['01', '02', '03']);
+    for (let index = 1; index <= 3; index++) {
+      assert.ok(await page.getByLabel(`Slot label ${index}`, { exact: true }).isVisible());
+      assert.ok(await page.getByLabel(`Slot time ${index}`, { exact: true }).isVisible());
+    }
+    await page.getByLabel('Slot label 1', { exact: true }).fill('Breakfast draft');
+    await page.keyboard.press('Tab');
+    assert.ok(await page.getByLabel('Slot time 1', { exact: true }).evaluate(input => input === document.activeElement), 'Tab reaches the corresponding time field');
+    await page.getByRole('button', { name: 'Revert', exact: true }).click();
+    await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
     await page.waitForTimeout(500);
     const actionBoxes = await Promise.all(['+ Add slot', 'Save', 'Revert'].map(name => page.getByRole('button', { name, exact: true }).boundingBox()));
     assert.ok(actionBoxes.every(box => box && Math.abs(box.y - actionBoxes[0]!.y) < 3), 'All actions on one line');

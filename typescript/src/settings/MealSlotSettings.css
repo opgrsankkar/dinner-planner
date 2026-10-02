@@ -4,7 +4,6 @@
 .folio-slots .settings-actions { display:flex; align-items:center; gap:18px; margin:0 0 28px; flex-wrap:nowrap; }
 .folio-slots .settings-save-actions { display:flex; gap:18px; }
 .folio-slots .slot-list { display:block; margin:0; padding:0; }
-.folio-slots .folio-slot-head { display:grid; grid-template-columns:minmax(0,1fr) 135px 44px; font-size:12px; letter-spacing:.04em; padding-bottom:14px; }
 .folio-slots .slot-edit-row { position:relative; display:grid; grid-template-columns:48px minmax(0,1fr) 135px 44px; gap:12px; min-height:104px; padding:0; border:0; border-bottom:1px dashed var(--line,var(--border)); border-radius:0; background:transparent; touch-action:pan-y; cursor:default; }
 .folio-slots .slot-edit-row label { min-width:0; margin:0; }
 .folio-slots .slot-edit-row input { width:100%; min-width:0; border:0; border-radius:0; background:transparent; color:inherit; box-shadow:none; padding:12px 0; touch-action:pan-y; cursor:text; }
@@ -17,7 +16,6 @@
 .folio-slots .slot-save-button { width:84px; }
 @media(max-width:700px) {
  .folio-slots .slot-edit-row { grid-template-columns:27px minmax(0,1fr) 112px 36px; gap:5px; }
- .folio-slots .folio-slot-head { grid-template-columns:minmax(0,1fr) 112px 36px; }
  .folio-slots .folio-slot-number { width:27px; }
  .folio-slots .slot-name { font-size:18px; }
  .folio-slots .slot-time { font-size:14px; }
