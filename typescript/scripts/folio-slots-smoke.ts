@@ -43,6 +43,29 @@ async function openSlots(page: Page) {
 async function checkOrder(page: Page, names: string[]) {
   await page.waitForFunction(names => JSON.stringify([...document.querySelectorAll<HTMLInputElement>('.slot-name')].map(input => input.value)) === JSON.stringify(names), names);
 }
+async function checkSlotRowLayout(page: Page) {
+  const rows = page.locator('.slot-edit-row');
+  assert.equal(await page.locator('.folio-slot-number').count(), 0, 'Meal slot rows have no visible numeric prefix');
+  for (const row of await rows.all()) {
+    const name = row.locator('.slot-name');
+    const time = row.locator('.slot-time');
+    const remove = row.locator('.remove-slot');
+    const [rowGrid, headerGrid, nameBox, nameHeaderBox, timeBox, timeHeaderBox, removeBox, removeHeaderBox] = await Promise.all([
+      row.evaluate(el => getComputedStyle(el).gridTemplateColumns),
+      page.locator('.folio-slot-head').evaluate(el => getComputedStyle(el).gridTemplateColumns),
+      name.boundingBox(), page.locator('.folio-slot-head > span').nth(0).boundingBox(),
+      time.boundingBox(), page.locator('.folio-slot-head > span').nth(1).boundingBox(),
+      remove.boundingBox(), page.locator('.folio-slot-head > span').nth(2).boundingBox(),
+    ]);
+    assert.ok(rowGrid && rowGrid.split(' ').length === 3, `No empty number track: ${rowGrid}`);
+    assert.ok(headerGrid && headerGrid.split(' ').length === 3, `Header has only Name, Time and delete columns: ${headerGrid}`);
+    assert.ok(nameBox && nameHeaderBox && Math.abs(nameBox.x - nameHeaderBox.x) < 2, 'Name input aligns with Name heading');
+    assert.ok(timeBox && timeHeaderBox && Math.abs(timeBox.x - timeHeaderBox.x) < 2, 'Time input aligns with Time heading');
+    assert.ok(removeBox && removeHeaderBox && Math.abs(removeBox.x - removeHeaderBox.x) < 2, 'Delete aligns with its trailing column');
+  }
+  assert.equal(await page.getByLabel('Slot label 1', { exact: true }).count(), 1, 'Accessible name label remains');
+  assert.equal(await page.getByLabel('Slot time 1', { exact: true }).count(), 1, 'Accessible time label remains');
+}
 try {
   let ready = false;
   for (let i = 0; i < 60; i++) {
@@ -80,6 +103,7 @@ try {
     await page.goto(`${origin}/settings`);
     await openSlots(page);
     await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
+    await checkSlotRowLayout(page);
     await page.waitForTimeout(500);
     const actionBoxes = await Promise.all(['+ Add slot', 'Save', 'Revert'].map(name => page.getByRole('button', { name, exact: true }).boundingBox()));
     assert.ok(actionBoxes.every(box => box && Math.abs(box.y - actionBoxes[0]!.y) < 3), 'All actions on one line');
