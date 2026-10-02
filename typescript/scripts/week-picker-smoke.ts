@@ -47,6 +47,8 @@ try {
     await page.getByLabel("Password", { exact: true }).fill(password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page.getByRole("navigation", { name: "Week navigation" }).waitFor();
+    const thisWeek = page.getByRole("button", { name: "This week", exact: true });
+    await expect(thisWeek).toHaveCount(0);
     const trigger = page.getByRole("button", { name: /choose week/ });
     // This behavior assertion fails on master: its week range is an inert span.
     await expect(trigger).toBeVisible({ timeout: 5000 });
@@ -82,6 +84,7 @@ try {
       cells.forEach((cell, i) => { assert.equal(cell.y, cells[0]!.y); if (i) assert.ok(cell.x > cells[i - 1]!.x); });
       const rect = await modal.boundingBox();
       assert.ok(rect && rect.x >= 0 && rect.y >= 0 && rect.x + rect.width <= width && rect.y + rect.height <= height, "Dialog fits viewport");
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "Planner navigation fits viewport");
       const scroll = modal.locator(".week-picker-scroll");
       await scroll.evaluate(node => { node.scrollTop = -99999; });
       assert.equal(await scroll.evaluate(node => node.scrollTop), 0);
@@ -104,6 +107,7 @@ try {
       await page.keyboard.press("Escape");
       await expect(modal).not.toBeVisible();
       await expect(trigger).toBeFocused();
+      await page.screenshot({ path: join(artifacts, `week-nav-current-${width}-${date}-${theme}.png`), fullPage: true });
     }
     await trigger.press("Space");
     await expect(modal).toBeVisible();
@@ -121,6 +125,20 @@ try {
     const tap = modal.locator(`[data-week="${tappedWeek}"]`);
     if (width < 700) await tap.tap(); else await tap.click();
     await expect(modal).not.toBeVisible();
+    await expect(thisWeek).toBeVisible();
+    await page.screenshot({ path: join(artifacts, `week-nav-past-${width}-${date}.png`), fullPage: true });
+    await thisWeek.click();
+    await expect(thisWeek).toHaveCount(0);
+    assert.equal(await page.locator(".day-header .day-date").first().textContent(), new Date(`${initialWeek}T12:00:00Z`).toLocaleDateString("en", { day: "numeric", month: "short", timeZone: "UTC" }));
+    await page.getByRole("button", { name: "Next week", exact: true }).click();
+    await expect(thisWeek).toBeVisible();
+    await page.screenshot({ path: join(artifacts, `week-nav-future-${width}-${date}.png`), fullPage: true });
+    await thisWeek.click();
+    await expect(thisWeek).toHaveCount(0);
+    await page.getByRole("link", { name: "Settings", exact: true }).click();
+    await expect(page.getByRole("link", { name: "← Back to plan", exact: true })).toBeVisible();
+    await page.getByRole("link", { name: "← Back to plan", exact: true }).click();
+    await expect(thisWeek).toHaveCount(0);
     // Arrows remain unrestricted; opening an out-of-bounds week must preserve it without a false selection.
     for (let i = 0; i < 22; i++) await page.getByRole("button", { name: "Next week", exact: true }).click();
     const outsideLabel = await trigger.textContent();
