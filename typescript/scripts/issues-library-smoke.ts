@@ -65,9 +65,9 @@ try {
     const cue = await field.evaluate(async el => {
       (el.closest('form')!.querySelector('button[type=submit]') as HTMLButtonElement).click();
       const animations = el.getAnimations();
-      const keyframes = animations.map(animation => animation.effect?.getKeyframes() ?? []);
+      const keyframes = animations.map(animation => animation.effect instanceof KeyframeEffect ? animation.effect.getKeyframes() : []);
       const initialColor = getComputedStyle(el).color;
-      const wiggle = animations.find(animation => animation.effect?.getKeyframes().some(frame => frame.transform !== undefined));
+      const wiggle = animations.find(animation => animation.effect instanceof KeyframeEffect && animation.effect.getKeyframes().some(frame => frame.transform !== undefined));
       const transforms: string[] = [];
       if (wiggle) {
         wiggle.pause();
@@ -104,7 +104,7 @@ try {
       // before a second protocol round trip on a CPU-loaded host.
       const reduced = await field.evaluate(async el => {
         (el.closest('form')!.querySelector('button[type=submit]') as HTMLButtonElement).click();
-        const frames = el.getAnimations().map(animation => animation.effect?.getKeyframes());
+        const frames = el.getAnimations().map(animation => animation.effect instanceof KeyframeEffect ? animation.effect.getKeyframes() : []);
         const initial = { color: getComputedStyle(el).color, transform: getComputedStyle(el).transform };
         const animations = el.getAnimations();
         await Promise.all(animations.map(animation => animation.finished.catch(() => {})));
