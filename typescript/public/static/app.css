@@ -288,3 +288,10 @@ html[data-theme=dark] .library-feedback[role=alert]{color:#ff8c9c}
 .week-picker :is(button):hover,.week-picker :is(button):active{transform:none;box-shadow:none}
 .week-picker button:focus-visible,.week-picker-trigger:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
 @media(max-width:560px){.week-picker{padding:12px}.week-picker-days{grid-template-columns:44px repeat(7,minmax(0,1fr))}.week-picker-row{grid-template-columns:41px minmax(0,1fr)}}
+
+/* Account actions use the same inked, offset Folio buttons as the other settings controls. */
+.folio-account .folio-logout-button{min-height:44px;padding:10px 18px;border:1px solid var(--ink);border-radius:5px 8px 6px 7px;background:var(--pink);color:var(--ink);box-shadow:3px 3px 0 var(--ink);font-weight:700;transition:transform .12s,box-shadow .12s;}
+.folio-account .folio-logout-button:hover:not(:disabled){transform:translate(-1px,-1px);box-shadow:4px 4px 0 var(--ink);}
+.folio-account .folio-logout-button:active:not(:disabled){transform:translate(2px,2px);box-shadow:none;}
+.folio-account .folio-logout-button:focus-visible{outline:3px solid var(--ink);outline-offset:5px;}
+.folio-account .folio-logout-button:disabled{opacity:.65;cursor:wait;}

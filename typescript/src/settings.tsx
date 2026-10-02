@@ -126,9 +126,9 @@ export function SettingsPage({
               setFeedback={setFeedback}
             />
           </div>
-          <div id="settings-panel-account" hidden={active !== "account"}>
+          <div id="settings-panel-account" className="folio-account" hidden={active !== "account"}>
             <div className="folio-section-heading"><h2>Account</h2></div>
-            <button className="secondary-button" type="button" disabled={loggingOut}
+            <button className="secondary-button folio-logout-button" type="button" disabled={loggingOut}
               onClick={async () => {
                 setLoggingOut(true);
                 try { await onLogout(); }
