@@ -79,6 +79,9 @@ try {
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(`${origin}/settings`);
     await openSlots(page);
+    assert.equal(await page.getByText(/^(Name|Time)$/).count(), 0, 'No Name or Time heading above the slot inputs');
+    assert.ok(await page.getByLabel('Slot label 1', { exact: true }).isVisible(), 'Slot name keeps its accessible field label');
+    assert.ok(await page.getByLabel('Slot time 1', { exact: true }).isVisible(), 'Slot time keeps its accessible field label');
     await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
     await page.waitForTimeout(500);
     const actionBoxes = await Promise.all(['+ Add slot', 'Save', 'Revert'].map(name => page.getByRole('button', { name, exact: true }).boundingBox()));
