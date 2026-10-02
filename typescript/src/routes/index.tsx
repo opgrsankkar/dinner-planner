@@ -1,6 +1,7 @@
 import { createFileRoute, useLocation } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SettingsPage } from "../settings";
+import { WeekPicker } from "../WeekPicker";
 import type { Board, Meal, Card, Slot } from "../types";
 export const Route = createFileRoute("/")({ component: Planner });
 type Intent = {
@@ -403,9 +404,7 @@ export function Planner() {
             >
               ‹
             </button>
-            <span className="week-title">
-              {days[0].label} – {days[6].label}
-            </span>
+            <WeekPicker week={week} today={today()} label={`${days[0].label} – ${days[6].label}`} onSelect={setWeek} />
             <button
               className="icon-button"
               aria-label="Next week"
