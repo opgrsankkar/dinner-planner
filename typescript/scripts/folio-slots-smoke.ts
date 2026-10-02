@@ -82,7 +82,8 @@ try {
     await login.goto(origin);
     await login.getByLabel('Password', { exact: true }).fill(password);
     await login.getByRole('button', { name: 'Sign in', exact: true }).click();
-    await login.getByRole('heading', { name: 'Meal library' }).waitFor();
+    await login.getByRole('complementary', { name: 'Meal library', exact: true }).waitFor();
+    await login.locator('.meal-grid').waitFor();
     const snapshot = await (await setup.request.get(`${origin}/api/board`)).json();
     const seeded = snapshot.slots.map((slot: { id: string }, index: number) => ({ id: slot.id, name: ['Breakfast', 'Lunch', 'Dinner'][index], time: ['08:00', '13:00', '19:00'][index] }));
     const response = await setup.request.post(`${origin}/api/settings/slots`, { headers: { 'X-CSRF-Token': snapshot.csrf, Origin: origin }, data: { slots: seeded, revision: snapshot.settings.revision } });

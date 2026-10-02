@@ -121,7 +121,8 @@ try {
   await page.goto(origin);
   await page.getByLabel('Password', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await page.getByRole('heading', { name: 'Meal library' }).waitFor();
+  await page.getByRole('complementary', { name: 'Meal library', exact: true }).waitFor();
+  await page.locator('.meal-grid').waitFor();
   let writes = 0;
   page.on('request', request => { if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/library') writes++; });
   for (const theme of ['light', 'dark']) {

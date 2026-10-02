@@ -96,7 +96,8 @@ try {
   await page.goto("http://127.0.0.1:3100");
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await page.getByRole("heading", { name: "Meal library" }).waitFor();
+  await page.getByRole("complementary", { name: "Meal library", exact: true }).waitFor();
+  await page.locator(".meal-grid").waitFor();
   // Exercise history classification and integration warnings through synthetic
   // HTTP snapshots; this is UI evidence, separately from adapter contract tests.
   let synthetic = true;
