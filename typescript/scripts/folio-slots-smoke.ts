@@ -50,18 +50,15 @@ async function checkSlotRowLayout(page: Page) {
     const name = row.locator('.slot-name');
     const time = row.locator('.slot-time');
     const remove = row.locator('.remove-slot');
-    const [rowGrid, headerGrid, nameBox, nameHeaderBox, timeBox, timeHeaderBox, removeBox, removeHeaderBox] = await Promise.all([
+    const [rowGrid, nameBox, timeBox, removeBox] = await Promise.all([
       row.evaluate(el => getComputedStyle(el).gridTemplateColumns),
-      page.locator('.folio-slot-head').evaluate(el => getComputedStyle(el).gridTemplateColumns),
-      name.boundingBox(), page.locator('.folio-slot-head > span').nth(0).boundingBox(),
-      time.boundingBox(), page.locator('.folio-slot-head > span').nth(1).boundingBox(),
-      remove.boundingBox(), page.locator('.folio-slot-head > span').nth(2).boundingBox(),
+      name.boundingBox(), time.boundingBox(), remove.boundingBox(),
     ]);
     assert.ok(rowGrid && rowGrid.split(' ').length === 3, `No empty number track: ${rowGrid}`);
-    assert.ok(headerGrid && headerGrid.split(' ').length === 3, `Header has only Name, Time and delete columns: ${headerGrid}`);
-    assert.ok(nameBox && nameHeaderBox && Math.abs(nameBox.x - nameHeaderBox.x) < 2, 'Name input aligns with Name heading');
-    assert.ok(timeBox && timeHeaderBox && Math.abs(timeBox.x - timeHeaderBox.x) < 2, 'Time input aligns with Time heading');
-    assert.ok(removeBox && removeHeaderBox && Math.abs(removeBox.x - removeHeaderBox.x) < 2, 'Delete aligns with its trailing column');
+    assert.equal(await page.locator('.folio-slot-head').count(), 0, 'Visible headings remain removed');
+    assert.ok(nameBox && timeBox && removeBox, 'All row controls remain visible');
+    assert.ok(nameBox.x + nameBox.width <= timeBox.x + 2, 'Name and time do not overlap');
+    assert.ok(timeBox.x + timeBox.width <= removeBox.x + 2, 'Time and delete do not overlap');
   }
   assert.equal(await page.getByLabel('Slot label 1', { exact: true }).count(), 1, 'Accessible name label remains');
   assert.equal(await page.getByLabel('Slot time 1', { exact: true }).count(), 1, 'Accessible time label remains');
@@ -102,6 +99,9 @@ try {
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(`${origin}/settings`);
     await openSlots(page);
+    assert.equal(await page.getByText(/^(Name|Time)$/).count(), 0, 'No Name or Time heading above the slot inputs');
+    assert.ok(await page.getByLabel('Slot label 1', { exact: true }).isVisible(), 'Slot name keeps its accessible field label');
+    assert.ok(await page.getByLabel('Slot time 1', { exact: true }).isVisible(), 'Slot time keeps its accessible field label');
     await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
     await checkSlotRowLayout(page);
     await page.waitForTimeout(500);
