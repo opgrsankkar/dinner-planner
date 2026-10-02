@@ -266,3 +266,32 @@ html .folio-slots .slot-edit-row input:focus {
 .library-feedback:empty{display:none}
 .library-feedback[role=alert]{color:#b42335}
 html[data-theme=dark] .library-feedback[role=alert]{color:#ff8c9c}
+
+/* Continuous Monday-first week picker. Its rows are bounded to the five-month window. */
+.week-nav .week-title{min-width:0;padding:8px 10px;border:0;border-radius:5px;background:transparent;color:var(--ink);font:900 22px 'Liberation Sans Narrow','Arial Narrow',Impact,sans-serif;letter-spacing:0;cursor:pointer}
+.week-nav .week-title:hover{background:var(--surface-2)}
+.week-nav .week-title:focus-visible,.week-picker-close:focus-visible,.week-calendar-week:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.week-picker-dialog{width:min(680px,calc(100vw - 24px));max-height:92dvh;padding:clamp(16px,4vw,26px);overflow:hidden}
+.week-picker-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:14px}
+.week-picker-heading h2{margin:0 0 4px}
+.week-picker-heading p{margin:0;color:var(--muted);font-size:13px}
+.week-picker-close{width:36px;height:36px;flex:none;border:1px solid var(--ink);border-radius:5px;background:var(--cream);color:var(--ink);font-size:25px;line-height:1;cursor:pointer}
+.week-calendar{min-width:0}
+.week-calendar-header,.week-calendar-row{display:grid;grid-template-columns:minmax(64px,96px) repeat(7,minmax(0,1fr));align-items:stretch}
+.week-calendar-header{position:sticky;top:0;background:var(--paper);color:var(--muted);font-size:12px;font-weight:700;text-align:center}
+.week-calendar-header>span{padding:5px 0 8px}
+.week-calendar-rows{max-height:min(64dvh,590px);overflow-y:auto;overscroll-behavior:contain;scrollbar-color:var(--line) transparent;scrollbar-width:thin}
+.week-calendar-row{min-height:44px;border-top:1px solid var(--line)}
+.week-calendar-month{align-self:center;padding:5px 5px 5px 0;color:var(--muted);font-size:12px;font-weight:600;line-height:1.15}
+.week-calendar-month.is-current-month{color:var(--ink);font-weight:800}
+.week-calendar-week{display:grid;grid-column:2/-1;grid-row:1;grid-template-columns:repeat(7,minmax(0,1fr));align-items:center;min-width:0;min-height:43px;margin:0;padding:0;border:0;background:transparent;color:inherit;text-align:center;cursor:pointer}
+.week-calendar-row.is-selected{background:var(--green-soft);box-shadow:inset 0 0 0 1px var(--green)}
+.week-calendar-week:hover{background:color-mix(in srgb,var(--green-soft) 72%,transparent)}
+.week-calendar-date{display:grid;place-items:center;min-width:0;height:34px;margin:0 2px;color:var(--muted);opacity:.68;font-size:14px;font-weight:500}
+.week-calendar-date.is-current-month{color:var(--ink);opacity:1;font-weight:700}
+.week-calendar-date.is-today{border-radius:50%;background:var(--green);color:var(--paper)}
+.week-calendar-row.is-selected .week-calendar-date{color:var(--ink);opacity:1}
+.week-calendar-row.is-selected .week-calendar-date.is-today{color:var(--paper)}
+.week-calendar-week:active{background:var(--green-soft)}
+@media(max-width:700px){.week-nav .week-title{font-size:18px}.week-picker-dialog{width:calc(100vw - 20px);max-height:94dvh;padding:16px 12px}.week-picker-heading{margin-bottom:10px}.week-calendar-header,.week-calendar-row{grid-template-columns:minmax(55px,68px) repeat(7,minmax(0,1fr))}.week-calendar-month{font-size:11px}.week-calendar-rows{max-height:min(68dvh,620px)}.week-calendar-date{height:34px;margin-inline:0;font-size:13px}}
+@media(prefers-reduced-motion:reduce){.week-picker-dialog,.week-calendar-week,.week-picker-close{scroll-behavior:auto;transition:none!important}}

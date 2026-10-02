@@ -1,6 +1,7 @@
 import { createFileRoute, useLocation } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SettingsPage } from "../settings";
+import { WeekCalendar } from "../WeekCalendar";
 import type { Board, Meal, Card, Slot } from "../types";
 export const Route = createFileRoute("/")({ component: Planner });
 type Intent = {
@@ -104,6 +105,7 @@ export function Planner() {
     }
   }
   const [week, setWeek] = useState(monday);
+  const [weekPickerOpen, setWeekPickerOpen] = useState(false);
   const [target, setTarget] = useState<Meal | null>(null);
   const [day, setDay] = useState(week);
   const [slotId, setSlotId] = useState("");
@@ -403,9 +405,15 @@ export function Planner() {
             >
               ‹
             </button>
-            <span className="week-title">
+            <button
+              className="week-title"
+              type="button"
+              aria-haspopup="dialog"
+              aria-label={`Choose week, ${days[0].label} through ${days[6].label}`}
+              onClick={() => setWeekPickerOpen(true)}
+            >
               {days[0].label} – {days[6].label}
-            </span>
+            </button>
             <button
               className="icon-button"
               aria-label="Next week"
@@ -799,6 +807,16 @@ export function Planner() {
           </aside>
         </main>
       )}
+      <WeekCalendar
+        open={weekPickerOpen}
+        selectedWeek={week}
+        currentDate={today()}
+        onSelect={(selected) => {
+          setWeek(selected);
+          setWeekPickerOpen(false);
+        }}
+        onClose={() => setWeekPickerOpen(false)}
+      />
       <dialog
         ref={deleteDialog}
         className="confirm-dialog"
