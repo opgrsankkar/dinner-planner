@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { SwipeMealRow } from "./SwipeMealRow";
 import type { Meal } from "../types";
 import "./MealLibrarySettings.css";
 
@@ -105,19 +106,11 @@ export function MealLibrarySettings({ library, action }: MealLibrarySettingsProp
           {adding ? "Adding…" : "＋ Add Meal"}
         </button>
       </form>
+      <p className="folio-library-hint">Swipe right to edit, left to delete. Or focus a meal and Tab to its actions.</p>
       <div className="folio-library-list">
         {library.filter(meal => meal.name.toLowerCase().includes(search.trim().toLowerCase())).map(meal => (
-          <div className="folio-library-row" key={meal.id}>
-            <span className="folio-library-name">{meal.name}</span>
-            <button className="folio-library-remove" type="button"
-              aria-label={`Remove ${meal.name} from library`} disabled={removing.includes(meal.id)}
-              aria-busy={removing.includes(meal.id)} onClick={() => void removeMeal(meal)}>
-              {removing.includes(meal.id) ? <span className="folio-library-spinner" aria-hidden="true" /> :
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-                  <path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7" />
-                </svg>}
-            </button>
-          </div>
+          <SwipeMealRow key={meal.id} meal={meal} hint={meal.id === library[0]?.id}
+            removing={removing.includes(meal.id)} remove={() => void removeMeal(meal)} action={action} />
         ))}
       </div>
       <div className="folio-library-feedback" role={error ? "alert" : "status"}>{error || feedback}</div>

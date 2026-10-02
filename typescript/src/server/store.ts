@@ -311,6 +311,18 @@ export class Store {
         value: JSON.stringify(settings),
       });
   }
+  async renameLibrary(mealId: string, name: string) {
+    if (!uuidPattern.test(mealId)) throw new Error("Invalid meal ID");
+    name = name.trim();
+    if (!name || name.length > 120) throw new Error("Meal name must be 1–120 characters");
+    return this.write(async () => {
+      const meals = await this.db.orm.Library.all();
+      if (!meals.some(meal => meal.id === mealId)) throw new Error("Meal not found");
+      if (meals.some(meal => meal.id !== mealId && meal.name.toLowerCase() === name.toLowerCase()))
+        throw new Error("A meal with this name already exists");
+      await this.db.orm.Library.where({ id: id(mealId) }).update({ name });
+    });
+  }
   async removeLibrary(mealId: string) {
     if (!uuidPattern.test(mealId)) throw new Error("Invalid meal ID");
     await this.write(() =>

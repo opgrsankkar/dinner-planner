@@ -175,6 +175,7 @@ export async function handle(
         "/api/settings/slots",
         "/api/settings/theme",
         "/api/library/remove",
+        "/api/library/rename",
         "/api/library/shuffle",
       ].includes(url.pathname)
     ) {
@@ -209,7 +210,9 @@ export async function handle(
         if (theme !== "system" && theme !== "light" && theme !== "dark")
           throw new Error("Invalid theme");
         await store.saveTheme(theme);
-      } else if (url.pathname === "/api/library/remove")
+      } else if (url.pathname === "/api/library/rename")
+        await store.renameLibrary(string("mealId"), string("name"));
+      else if (url.pathname === "/api/library/remove")
         await store.removeLibrary(string("mealId"));
       else if (url.pathname === "/api/library/shuffle") await store.shuffle();
       else {
