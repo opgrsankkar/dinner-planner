@@ -770,3 +770,48 @@ test("slot save migrates prior aliases, excludes completed meals and refuses occ
     await f.close();
   }
 });
+
+test("library rename persists identity/order and leaves planned provider meals unchanged", async () => {
+  const f = await fixture();
+  try {
+    await f.store.shuffle();
+    const before = await f.store.board(f.provider);
+    await f.store.place(f.input, f.project.id);
+    await f.worker.tick();
+    const planned = await f.provider.list(f.project.id);
+    await f.store.renameLibrary(f.input.mealId, "  Renamed reusable meal  ");
+    const after = await f.store.board(f.provider);
+    assert.deepEqual(after.library.map(meal => meal.id), before.library.map(meal => meal.id));
+    assert.equal(after.library.find(meal => meal.id === f.input.mealId)?.name, "Renamed reusable meal");
+    assert.deepEqual(await f.provider.list(f.project.id), planned);
+    const other = after.library.find(meal => meal.id !== f.input.mealId)!;
+    await assert.rejects(f.store.renameLibrary(f.input.mealId, other.name.toUpperCase()), /already exists/);
+    for (const name of ["   ", "x".repeat(121)]) await assert.rejects(f.store.renameLibrary(f.input.mealId, name), /1–120/);
+    await assert.rejects(f.store.renameLibrary(randomUUID(), "Missing meal"), /not found/);
+    await assert.rejects(f.store.renameLibrary("bad-id", "Name"), /Invalid meal ID/);
+    const reopened = new Store(f.path);
+    try { assert.equal((await reopened.board(f.provider)).library.find(meal => meal.id === f.input.mealId)?.name, "Renamed reusable meal"); }
+    finally { await reopened.close(); }
+  } finally { await f.close(); }
+});
+
+test("rename API requires authentication, same origin and CSRF and validates fields", async () => {
+  const f = await fixture();
+  const app: App = { store: f.store, todoist: f.provider, worker: f.worker, password: randomUUID(), origin: "http://localhost:3000", loginFailures: { count: 0, resetAt: 0 } };
+  const request = (path: string, body: unknown, headers: Record<string, string> = {}) => new Request(app.origin + path, {
+    method: "POST", headers: { origin: app.origin, "content-type": "application/json", ...headers }, body: JSON.stringify(body),
+  });
+  const body = { mealId: f.input.mealId, name: "API renamed meal" };
+  try {
+    assert.equal((await handle(request("/api/library/rename", body), app)).status, 401);
+    const login = await handle(request("/api/login", { password: app.password }), app);
+    const cookie = login.headers.get("set-cookie")!;
+    const board = await (await handle(new Request(app.origin + "/api/board", { headers: { cookie } }), app)).json();
+    assert.equal((await handle(request("/api/library/rename", body, { cookie }), app)).status, 403);
+    const headers = { cookie, "x-csrf-token": board.csrf };
+    assert.equal((await handle(request("/api/library/rename", body, { ...headers, origin: "http://evil.test" }), app)).status, 403);
+    assert.equal((await handle(request("/api/library/rename", { ...body, name: 3 }, headers), app)).status, 400);
+    assert.equal((await handle(request("/api/library/rename", body, headers), app)).status, 202);
+    assert.equal((await f.store.board(f.provider)).library.find(meal => meal.id === body.mealId)?.name, body.name);
+  } finally { await f.close(); }
+});
