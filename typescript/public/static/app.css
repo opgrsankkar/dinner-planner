@@ -266,3 +266,25 @@ html .folio-slots .slot-edit-row input:focus {
 .library-feedback:empty{display:none}
 .library-feedback[role=alert]{color:#b42335}
 html[data-theme=dark] .library-feedback[role=alert]{color:#ff8c9c}
+
+/* Continuous week picker, using the shared Apricot Folio palette. */
+.week-picker-trigger{border:0;background:transparent;color:var(--ink);padding:6px 2px;cursor:pointer}
+.week-picker{width:min(520px,calc(100vw - 24px));max-width:none;max-height:calc(100dvh - 24px);padding:18px;background:var(--cream);color:var(--ink);overflow:hidden}
+.week-picker[open]{display:flex;flex-direction:column}
+.week-picker-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.week-picker-heading h2{margin:0;font-size:24px}
+.week-picker-heading button{min-width:40px;min-height:40px;font-size:24px}
+.week-picker-help{color:var(--muted);font-size:12px;margin:10px 0 16px}
+.week-picker-days{display:grid;grid-template-columns:58px repeat(7,minmax(0,1fr));font-size:11px;text-align:center;padding-bottom:8px;border-bottom:1px dashed var(--line)}
+.week-picker-scroll{overflow-y:auto;overscroll-behavior:contain;max-height:420px;min-height:0;scrollbar-width:thin;padding:4px 3px}
+.week-picker-row{display:grid;grid-template-columns:55px minmax(0,1fr);align-items:center;min-height:44px}
+.week-picker-months{color:var(--muted);font-size:12px;font-weight:600}
+.week-picker-months small{display:block;font-size:10px}
+.week-picker-week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));align-items:center;min-height:44px;width:100%;padding:0;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--muted);cursor:pointer;font-size:13px}
+.week-picker .current-month{color:var(--ink);font-weight:700}
+.week-picker-week[aria-pressed=true]{background:var(--pink);border-color:var(--ink)}
+.week-picker-week:hover{background:var(--green-soft)}
+.week-picker-week[aria-pressed=true]:hover{background:var(--pink)}
+.week-picker :is(button):hover,.week-picker :is(button):active{transform:none;box-shadow:none}
+.week-picker button:focus-visible,.week-picker-trigger:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
+@media(max-width:560px){.week-picker{padding:12px}.week-picker-days{grid-template-columns:44px repeat(7,minmax(0,1fr))}.week-picker-row{grid-template-columns:41px minmax(0,1fr)}}
