@@ -451,7 +451,6 @@ export function Planner() {
       ) : (
         <main className="app-layout">
           <section className="planner-panel" aria-label="Weekly meal planner">
-            <div className="folio-planner-heading"><h1>Weekly plan</h1><span aria-hidden="true">✦</span></div>
             {error && (
               <p className="error-banner" role="alert">
                 {error}
@@ -683,8 +682,7 @@ export function Planner() {
             </div>
           </section>
           <aside className="library-panel" aria-label="Meal library">
-            <div className="library-heading">
-              <h1>Meal library</h1>
+            <div className="library-actions">
               <button
                 className="shuffle-button"
                 type="button"

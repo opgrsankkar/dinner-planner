@@ -1,11 +1,13 @@
 import { chromium } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 const directory = await mkdtemp(join(tmpdir(), "planner-browser-"));
+const screenshots = join(process.cwd(), ".local", "issue-39");
+await mkdir(screenshots, { recursive: true });
 const password = randomUUID();
 const env = {
   ...process.env,
@@ -48,7 +50,11 @@ try {
   await page.goto(env.PLANNER_ORIGIN);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await page.getByRole("heading", { name: "Weekly plan", exact: true }).waitFor();
+  await page.getByRole("region", { name: "Weekly meal planner", exact: true }).waitFor();
+  await page.locator(".meal-grid").waitFor();
+  assert.equal(await page.getByRole("heading", { name: "Weekly plan", exact: true }).count(), 0);
+  assert.equal(await page.getByRole("heading", { name: "Meal library", exact: true }).count(), 0);
+  await page.getByRole("complementary", { name: "Meal library", exact: true }).waitFor();
   await page.getByRole("button", { name: "Next week", exact: true }).click();
   await page.getByRole("button", { name: "Previous week", exact: true }).click();
   await page.getByRole("button", { name: "This week", exact: true }).click();
@@ -56,10 +62,14 @@ try {
   await page.getByLabel("Search or type a meal name", { exact: true }).fill(mealName);
   await page.getByRole("button", { name: "Add meal", exact: true }).click();
   await page.getByLabel("Search or type a meal name", { exact: true }).fill("");
+  await page.getByRole("button", { name: `Plan ${mealName}`, exact: true }).waitFor();
+  await page.reload();
+  await page.getByRole("region", { name: "Weekly meal planner", exact: true }).waitFor();
+  await page.getByRole("button", { name: `Plan ${mealName}`, exact: true }).waitFor();
   await page.getByRole("button", { name: `Plan ${mealName}`, exact: true }).click();
   await page.locator(".planner-action-form").getByRole("button", { name: "Plan meal", exact: true }).click();
   await page.getByRole("button", { name: "Saving meal", exact: true }).first().waitFor();
-  await page.screenshot({ path: join(tmpdir(), "folio-planner-desktop-light.png"), fullPage: true });
+  await page.screenshot({ path: join(screenshots, "planner-desktop-light.png"), fullPage: true });
   await page.getByRole("button", { name: `Move ${mealName}`, exact: true }).waitFor({ timeout: 30000 });
   await page.getByRole("button", { name: `Move ${mealName}`, exact: true }).click();
   await page.locator("#plan-slot").selectOption({ index: 1 });
@@ -67,13 +77,15 @@ try {
   await page.getByRole("button", { name: `Move ${mealName}`, exact: true }).waitFor({ timeout: 30000 });
   await page.getByRole("button", { name: "Switch to dark theme", exact: true }).click();
   await page.locator("html[data-theme=dark]").waitFor();
-  await page.screenshot({ path: join(tmpdir(), "folio-planner-desktop-dark.png"), fullPage: true });
+  await page.screenshot({ path: join(screenshots, "planner-desktop-dark.png"), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-  await page.screenshot({ path: join(tmpdir(), "folio-planner-mobile-dark.png"), fullPage: true });
+  assert.equal(await page.getByRole("heading", { name: "Weekly plan", exact: true }).count(), 0);
+  assert.equal(await page.getByRole("heading", { name: "Meal library", exact: true }).count(), 0);
+  await page.screenshot({ path: join(screenshots, "planner-mobile-dark.png"), fullPage: true });
   await page.getByRole("button", { name: "Switch to light theme", exact: true }).click();
   await page.locator("html[data-theme=light]").waitFor();
-  await page.screenshot({ path: join(tmpdir(), "folio-planner-mobile-light.png"), fullPage: true });
+  await page.screenshot({ path: join(screenshots, "planner-mobile-light.png"), fullPage: true });
   await page.getByRole("button", { name: `Delete ${mealName}`, exact: true }).click();
   await page.getByRole("button", { name: `Move ${mealName}`, exact: true }).waitFor({ state: "hidden" });
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -108,7 +120,7 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "← Back to settings", exact: true }).click();
   assert.equal(await page.locator('.settings-panels > div[id]:visible').count(), 0);
-  assert.equal(await nav.getByRole("button").count(), 3);
+  assert.equal(await nav.getByRole("button").count(), 4);
   assert.equal(await page.getByRole("link", { name: "← Back to plan", exact: true }).isVisible(), true);
   await page.screenshot({ path: join(tmpdir(), "folio-mobile-landing.png"), fullPage: true });
   for (const name of ["Appearance", "Meal library", "Meal slots"]) {
@@ -133,7 +145,7 @@ try {
   await page.getByRole("link", { name: "← Back to plan", exact: true }).click();
   await page.getByRole("navigation", { name: "Week navigation" }).waitFor();
   assert.deepEqual(errors, []);
-  console.log("Folio planner/settings smoke passed: planner add/plan/pending/move/delete, week navigation, light/dark screenshots, desktop/mobile panels, active indication, preserved mounts/search/drafts, Revert, focus return, mobile landing/reload, Back to plan. Screenshots saved to TMPDIR.");
+  console.log("Folio planner/settings smoke passed: planner add/persist/plan/pending/move/delete, week navigation, light/dark screenshots, desktop/mobile panels, active indication, preserved mounts/search/drafts, Revert, focus return, mobile landing/reload, Back to plan. Screenshots saved in .local/issue-39.");
 } finally {
   await browser?.close();
   server.kill("SIGTERM");
