@@ -105,6 +105,7 @@ export function Planner() {
     }
   }
   const [week, setWeek] = useState(monday);
+  const isCurrentWeek = week === monday();
   const [target, setTarget] = useState<Meal | null>(null);
   const [day, setDay] = useState(week);
   const [slotId, setSlotId] = useState("");
@@ -415,9 +416,11 @@ export function Planner() {
           </nav>
         )}
         {!settingsPage && <div className="top-actions">
-          <button className="this-week" onClick={() => setWeek(monday())}>
-            This week
-          </button>
+          {!isCurrentWeek && (
+            <button className="this-week" onClick={() => setWeek(monday())}>
+              This week
+            </button>
+          )}
           <button
             className="icon-button theme-toggle"
             aria-label={`Switch to ${effectiveTheme === "dark" ? "light" : "dark"} theme`}
