@@ -8,6 +8,7 @@ const sections = [
   { id: "appearance", label: "Appearance" },
   { id: "library", label: "Meal library" },
   { id: "slots", label: "Meal slots" },
+  { id: "account", label: "Account" },
 ] as const;
 type Section = (typeof sections)[number]["id"];
 
@@ -17,10 +18,12 @@ export function SettingsPage({
   board,
   post,
   refresh,
+  onLogout,
 }: {
   board: Board;
   post: (path: string, body: unknown) => Promise<unknown>;
   refresh: () => Promise<void>;
+  onLogout: () => Promise<void>;
 }) {
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
@@ -58,6 +61,7 @@ export function SettingsPage({
     requestAnimationFrame(() => navigation.current
       ?.querySelector<HTMLButtonElement>(`[data-section="${previous}"]`)?.focus());
   }
+  const [loggingOut, setLoggingOut] = useState(false);
   const [feedback, setFeedback] = useState("");
   async function action(path: string, body: unknown): Promise<boolean> {
     try {
@@ -121,6 +125,18 @@ export function SettingsPage({
               refresh={refresh}
               setFeedback={setFeedback}
             />
+          </div>
+          <div id="settings-panel-account" hidden={active !== "account"}>
+            <div className="folio-section-heading"><h2>Account</h2></div>
+            <button className="secondary-button" type="button" disabled={loggingOut}
+              onClick={async () => {
+                setLoggingOut(true);
+                try { await onLogout(); }
+                catch (error) { setFeedback((error as Error).message); }
+                finally { setLoggingOut(false); }
+              }}>
+              {loggingOut ? "Logging out…" : "Log out"}
+            </button>
           </div>
         </div>
       </div>
