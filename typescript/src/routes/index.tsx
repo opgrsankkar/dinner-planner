@@ -405,7 +405,7 @@ export function Planner() {
             >
               ‹
             </button>
-            <WeekPicker week={week} today={today()} label={`${days[0].label} – ${days[6].label}`} onSelect={setWeek} />
+            <WeekPicker week={week} today={today()} label={`${days[0].label} – ${days[6].label}`} isCurrent={isCurrentWeek} onSelect={setWeek} />
             <button
               className="icon-button"
               aria-label="Next week"

@@ -50,8 +50,14 @@ try {
     const thisWeek = page.getByRole("button", { name: "This week", exact: true });
     await expect(thisWeek).toHaveCount(0);
     const trigger = page.getByRole("button", { name: /choose week/ });
-    // This behavior assertion fails on master: its week range is an inert span.
+    await expect(page.getByText("(current)", { exact: true })).toHaveCount(1);
+    assert.ok(!(await trigger.getAttribute("aria-label"))?.includes("(current)"), "The visible marker does not change the date trigger's accessible name");
     await expect(trigger).toBeVisible({ timeout: 5000 });
+    const dateRange = trigger.locator(":scope > span").first();
+    const marker = trigger.locator(".week-current-marker");
+    const [triggerBox, dateBox, markerBox] = await Promise.all([trigger.boundingBox(), dateRange.boundingBox(), marker.boundingBox()]);
+    assert.ok(triggerBox && dateBox && markerBox && markerBox.y >= dateBox.y + dateBox.height && markerBox.y + markerBox.height <= triggerBox.y + triggerBox.height, "The marker sits below the date range inside the trigger");
+    assert.ok(Math.abs((markerBox!.x + markerBox!.width / 2) - (triggerBox!.x + triggerBox!.width / 2)) < 2, "The marker stays centered under the date range");
     const modal = page.getByRole("dialog", { name: "Choose a week", exact: true });
     const initialWeek = weekStart(date);
     const calendar = calendarWeeks(date);
@@ -117,6 +123,7 @@ try {
     await page.keyboard.press("Enter");
     await expect(modal).not.toBeVisible();
     await expect(trigger).toBeFocused();
+    await expect(page.getByText("(current)", { exact: true })).toHaveCount(0);
     await expect(page.locator(".day-header .day-date").first()).toHaveText(new Date(`${nextWeek}T12:00:00Z`).toLocaleDateString("en", { day: "numeric", month: "short", timeZone: "UTC" }));
     await page.getByRole("button", { name: "Previous week", exact: true }).click();
     await trigger.click();
@@ -126,15 +133,19 @@ try {
     if (width < 700) await tap.tap(); else await tap.click();
     await expect(modal).not.toBeVisible();
     await expect(thisWeek).toBeVisible();
+    await expect(page.getByText("(current)", { exact: true })).toHaveCount(0);
     await page.screenshot({ path: join(artifacts, `week-nav-past-${width}-${date}.png`), fullPage: true });
     await thisWeek.click();
     await expect(thisWeek).toHaveCount(0);
+    await expect(page.getByText("(current)", { exact: true })).toHaveCount(1);
     assert.equal(await page.locator(".day-header .day-date").first().textContent(), new Date(`${initialWeek}T12:00:00Z`).toLocaleDateString("en", { day: "numeric", month: "short", timeZone: "UTC" }));
     await page.getByRole("button", { name: "Next week", exact: true }).click();
     await expect(thisWeek).toBeVisible();
+    await expect(page.getByText("(current)", { exact: true })).toHaveCount(0);
     await page.screenshot({ path: join(artifacts, `week-nav-future-${width}-${date}.png`), fullPage: true });
     await thisWeek.click();
     await expect(thisWeek).toHaveCount(0);
+    await expect(page.getByText("(current)", { exact: true })).toHaveCount(1);
     await page.getByRole("link", { name: "Settings", exact: true }).click();
     await expect(page.getByRole("link", { name: "← Back to plan", exact: true })).toBeVisible();
     await page.getByRole("link", { name: "← Back to plan", exact: true }).click();
