@@ -67,10 +67,23 @@ try {
         })),
       }), label));
     }
+    async function rowMeasurements(label: string) {
+      const measurements = await page.locator('.folio-library-row').evaluateAll(items => items.map(row => ({
+        id: row.getAttribute('data-meal-id'),
+        height: row.getBoundingClientRect().height,
+        name: row.querySelector('.folio-library-name')?.getBoundingClientRect().height ?? null,
+        actionTarget: row.querySelector('.folio-library-remove')?.getBoundingClientRect().toJSON() ?? null,
+      })));
+      await writeFile(join(artifacts, `row-heights-${label}-${width}-${theme}.json`), JSON.stringify({
+        viewport: { width, height: 900 }, theme, medianRowHeight: measurements[Math.floor(measurements.length / 2)]?.height,
+        rows: measurements,
+      }, null, 2));
+      return measurements;
+    }
     await page.addInitScript(() => {
       const events: unknown[] = [];
       Object.assign(window, { libraryTouchEvents: events });
-      for (const type of ['scroll', 'scrollend', 'touchstart', 'touchend', 'touchcancel', 'pointerdown', 'pointerup', 'pointercancel', 'mousedown', 'mouseup', 'click', 'focusin'])
+      for (const type of ['scroll', 'scrollend', 'touchstart', 'touchend', 'touchcancel', 'pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'mousedown', 'mouseup', 'click', 'focusin'])
         document.addEventListener(type, event => {
           const target = event.target instanceof Element ? event.target : document.documentElement;
           if (!['scroll', 'scrollend', 'mousedown', 'mouseup', 'click'].includes(type) && !target.closest('.folio-library')) return;
@@ -97,11 +110,24 @@ try {
     await page.getByRole('button', { name: 'Meal library', exact: true }).click();
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
     const library = page.locator('.folio-library'), rows = library.locator('.folio-library-row'), first = rows.first();
+    if (process.env.ISSUE_34_BASELINE === '1') await page.addStyleTag({ content: `
+      .folio-library .folio-library-surface { min-height: 98px; padding: 27px 0; }
+      .folio-library .folio-library-name { font-size: 23px; line-height: normal; }
+      .folio-library .folio-library-swipe-action { width: 56px; height: 56px; min-width: 0; min-height: 0; padding: 15px; }
+      .folio-library .folio-library-row:is(:focus-visible, :has(button:focus-visible)):not(.is-editing) .folio-library-surface,
+      .folio-library .folio-library-row:hover:not(.is-editing) .folio-library-surface { padding-left: 64px; padding-right: 64px; }
+    `});
     await expect.poll(() => first.locator('.folio-library-surface').evaluate(el => el.getAnimations().length)).toBeGreaterThan(0);
     const frames = await first.locator('.folio-library-surface').evaluate(el => (el.getAnimations()[0].effect as KeyframeEffect).getKeyframes());
-    assert.ok(frames.some(f => f.transform === 'translateX(-56px)') && frames.some(f => f.transform === 'translateX(56px)'));
+    assert.ok(frames.some(f => f.transform === 'translateX(-48px)') && frames.some(f => f.transform === 'translateX(48px)'));
     await page.waitForTimeout(2300);
     assert.equal(await first.locator('.folio-library-surface').evaluate(el => getComputedStyle(el).transform), 'matrix(1, 0, 0, 1, 0, 0)');
+    await page.mouse.move(1, 1);
+    await rowMeasurements('before');
+    await page.screenshot({ path: join(artifacts, `issue-34-before-${width}-${theme}.png`), fullPage: true });
+    if (process.env.ISSUE_34_BASELINE === '1') await page.locator('style').last().evaluate(style => style.remove());
+    await rowMeasurements('after');
+    await page.screenshot({ path: join(artifacts, `issue-34-after-${width}-${theme}.png`), fullPage: true });
     const name = await first.locator('.folio-library-name').innerText(), mealId = await first.getAttribute('data-meal-id');
     let mutations = 0; page.on('request', req => { if (req.method() === 'POST' && /\/api\/library/.test(req.url())) mutations++; });
     const cdp = await context.newCDPSession(page);
@@ -113,11 +139,12 @@ try {
       await cdp.send('Input.dispatchTouchEvent', { type: cancel ? 'touchCancel' : 'touchEnd', touchPoints: [] });
     }
     if (width < 500) {
+      await page.mouse.move(1, 1);
       await swipe(-80); await expect(first).toHaveAttribute('data-reveal', 'delete');
-      await expect.poll(() => first.locator('.folio-library-surface').evaluate(el => getComputedStyle(el).transform)).toBe('matrix(1, 0, 0, 1, -56, 0)');
+      await expect.poll(() => first.locator('.folio-library-surface').evaluate(el => getComputedStyle(el).transform)).toBe('matrix(1, 0, 0, 1, -48, 0)');
       await page.screenshot({ path: join(artifacts, `swipe-delete-${theme}.png`) });
       await swipe(80); await expect(first).toHaveAttribute('data-reveal', 'edit');
-      await expect.poll(() => first.locator('.folio-library-surface').evaluate(el => getComputedStyle(el).transform)).toBe('matrix(1, 0, 0, 1, 56, 0)');
+      await expect.poll(() => first.locator('.folio-library-surface').evaluate(el => getComputedStyle(el).transform)).toBe('matrix(1, 0, 0, 1, 48, 0)');
       await page.screenshot({ path: join(artifacts, `swipe-edit-${theme}.png`) });
       for (const [dx, dy, cancel] of [[20, 0, false], [-80, 0, true]] as const) {
         await swipe(dx, dy, cancel); await expect(first).toHaveAttribute('data-reveal', 'closed');
@@ -127,7 +154,7 @@ try {
       await swipe(10, -90); await expect(first).toHaveAttribute('data-reveal', 'closed');
       await expect.poll(() => page.evaluate(() => scrollY)).toBeGreaterThan(scrollBefore);
       assert.equal(mutations, 0); await swipe(80);
-      await expect.poll(() => first.locator('.folio-library-surface').evaluate(el => getComputedStyle(el).transform)).toBe('matrix(1, 0, 0, 1, 56, 0)');
+      await expect.poll(() => first.locator('.folio-library-surface').evaluate(el => getComputedStyle(el).transform)).toBe('matrix(1, 0, 0, 1, 48, 0)');
       await snapshot('before Edit tap');
       const edit = first.getByRole('button', { name: `Edit ${name}`, exact: true });
       await expect(edit).toBeVisible();
