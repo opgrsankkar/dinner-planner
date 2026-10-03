@@ -296,3 +296,5 @@ html[data-theme=dark] .library-feedback[role=alert]{color:#ff8c9c}
 .folio-account .folio-logout-button:active:not(:disabled){transform:translate(2px,2px);box-shadow:none;}
 .folio-account .folio-logout-button:focus-visible{outline:3px solid var(--ink);outline-offset:5px;}
 .folio-account .folio-logout-button:disabled{opacity:.65;cursor:wait;}
+
+@media(hover:none){.meal-chip[role=button]{touch-action:none;cursor:pointer;user-select:none;-webkit-user-select:none}.meal-chip[role=button].is-touch-dragging{opacity:.58;transform:scale(.96);box-shadow:0 0 0 2px var(--green)}}.meal-cell.touch-drop-hover{background:var(--green-soft);box-shadow:inset 0 0 0 2px var(--green)}
