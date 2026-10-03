@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import "./MealSlotSettings.css";
-import { sortSlotsByTime, validSlotTime } from "../slot-order";
+import { sortSlotsByTime, sortSlotsKeepingDraftsOnTop, validSlotTime } from "../slot-order";
 import type { Slot } from "../types";
 
 export interface MealSlotSettingsProps {
@@ -23,6 +23,7 @@ export function MealSlotSettings({ initialSlots, initialRevision, post, refresh,
   const [state, setState] = useState("idle");
   const dirty = JSON.stringify(slots) !== JSON.stringify(baseline);
   const saving = state === "saving";
+  const savedIds = new Set(baseline.map(slot => slot.id));
   const valid =
     slots.length > 0 &&
     slots.every(
@@ -30,8 +31,9 @@ export function MealSlotSettings({ initialSlots, initialRevision, post, refresh,
     ) &&
     new Set(slots.map((slot) => slot.time)).size === slots.length;
   function edit(id: string, patch: Partial<Slot>) {
-    setSlots(current => sortSlotsByTime(
+    setSlots(current => sortSlotsKeepingDraftsOnTop(
       current.map(slot => slot.id === id ? { ...slot, ...patch } : slot),
+      savedIds,
     ));
     setState("idle");
   }
@@ -85,7 +87,8 @@ export function MealSlotSettings({ initialSlots, initialRevision, post, refresh,
               className="secondary-button"
               disabled={saving || slots.length >= 12}
               onClick={() => {
-                setSlots([...slots, { id: crypto.randomUUID(), name: "", time: "" }]);
+                const draft = { id: crypto.randomUUID(), name: "", time: "" };
+                setSlots(current => [draft, ...current]);
                 setState("idle");
               }}
             >
@@ -163,7 +166,10 @@ export function MealSlotSettings({ initialSlots, initialRevision, post, refresh,
                   aria-label={`Remove slot ${slot.name}`}
                   disabled={saving || slots.length === 1}
                   onClick={() => {
-                    setSlots(sortSlotsByTime(slots.filter((item) => item.id !== slot.id)));
+                    setSlots(current => sortSlotsKeepingDraftsOnTop(
+                      current.filter(item => item.id !== slot.id),
+                      savedIds,
+                    ));
                     setState("idle");
                   }}
                 >

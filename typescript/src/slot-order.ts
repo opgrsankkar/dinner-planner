@@ -8,3 +8,15 @@ export function sortSlotsByTime<T extends Slot>(slots: T[]): T[] {
   if (!slots.every(slot => validSlotTime(slot.time))) return slots;
   return [...slots].sort((a, b) => a.time.localeCompare(b.time));
 }
+
+// New rows stay at the top while they are unsaved. Existing rows still use
+// chronological sorting as they are edited; any partial time freezes all rows.
+export function sortSlotsKeepingDraftsOnTop<T extends Slot>(
+  slots: T[],
+  savedIds: ReadonlySet<string>,
+): T[] {
+  if (!slots.every(slot => validSlotTime(slot.time))) return slots;
+  const drafts = slots.filter(slot => !savedIds.has(slot.id));
+  const saved = slots.filter(slot => savedIds.has(slot.id));
+  return [...drafts, ...sortSlotsByTime(saved)];
+}

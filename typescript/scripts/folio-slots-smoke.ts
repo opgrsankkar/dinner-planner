@@ -174,17 +174,29 @@ try {
       console.log(`SKIP ${label}px native keyboard partial: mobile picker has no editable segments`);
     }
     await page.getByRole('button', { name: '+ Add slot', exact: true }).click();
-    const addedId = await page.locator('.slot-edit-row').last().getAttribute('data-slot-id');
+    const addedId = await page.locator('.slot-edit-row').first().getAttribute('data-slot-id');
     const added = page.locator(`[data-slot-id="${addedId}"]`);
+    assert.equal(await added.locator('.slot-name').inputValue(), '', 'New draft is inserted at the top');
     await added.locator('.slot-name').fill('Snack');
     await added.locator('.slot-time').fill('16:00');
-    await checkOrder(page, ['Breakfast', 'Lunch', 'Snack', 'Dinner']);
+    await checkOrder(page, ['Snack', 'Breakfast', 'Lunch', 'Dinner']);
     await added.locator('.remove-slot').click();
     await added.waitFor({ state: 'detached' });
     await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
     assert.ok(await page.getByRole('button', { name: 'Save', exact: true }).isDisabled(), 'Remove added slot restores clean baseline');
     assert.ok(await page.getByRole('button', { name: 'Revert', exact: true }).isDisabled(), 'Revert is disabled after adding then removing a slot');
     await breakfast.locator('.slot-time').fill('20:00');
+    await page.getByRole('button', { name: '+ Add slot', exact: true }).click();
+    const snackId = await page.locator('.slot-edit-row').first().getAttribute('data-slot-id');
+    const snack = page.locator(`[data-slot-id="${snackId}"]`);
+    await snack.locator('.slot-name').fill('Snack');
+    await snack.locator('.slot-time').fill('16:00');
+    await page.getByRole('button', { name: '+ Add slot', exact: true }).click();
+    const supperId = await page.locator('.slot-edit-row').first().getAttribute('data-slot-id');
+    const supper = page.locator(`[data-slot-id="${supperId}"]`);
+    await supper.locator('.slot-name').fill('Supper');
+    await supper.locator('.slot-time').fill('18:00');
+    await checkOrder(page, ['Supper', 'Snack', 'Lunch', 'Dinner', 'Breakfast']);
     assert.ok(await page.getByRole('button', { name: 'Revert', exact: true }).isEnabled(), 'Revert is enabled before saving an edit');
     let fail = true;
     await page.route('**/api/settings/slots', async route => {
@@ -199,22 +211,41 @@ try {
     await page.getByRole('button', { name: 'Save failed', exact: true }).waitFor();
     assert.ok(await page.getByRole('button', { name: 'Save failed', exact: true }).isEnabled());
     await page.screenshot({ path: join(output, `slots-${label}-retry.png`), fullPage: true });
+    await page.evaluate(`
+      window.saveSlotSamples = [];
+      const until = performance.now() + 900;
+      function sample() {
+        document.querySelectorAll('.slot-edit-row').forEach(row => window.saveSlotSamples.push(row.style.transform));
+        if (performance.now() < until) requestAnimationFrame(sample);
+      }
+      requestAnimationFrame(sample);
+    `);
     await page.getByRole('button', { name: 'Save failed', exact: true }).click();
     await page.getByRole('button', { name: 'Saved', exact: true }).waitFor();
+    await checkOrder(page, ['Lunch', 'Snack', 'Supper', 'Dinner', 'Breakfast']);
+    await page.waitForTimeout(950);
+    assert.ok(await page.evaluate(() => (window as unknown as { saveSlotSamples: string[] }).saveSlotSamples.some(value => /translate/.test(value) && !/translateY\(0px\)/.test(value))), 'Saving moves drafts chronologically with the existing layout animation');
     assert.ok(await page.getByRole('button', { name: 'Revert', exact: true }).isDisabled(), 'Revert is disabled after save updates the baseline');
     await page.waitForTimeout(1100);
     await page.reload(); await openSlots(page);
-    await checkOrder(page, ['Lunch', 'Dinner', 'Breakfast']);
+    await checkOrder(page, ['Lunch', 'Snack', 'Supper', 'Dinner', 'Breakfast']);
     assert.ok(await page.getByRole('button', { name: 'Revert', exact: true }).isDisabled(), 'Revert is disabled after reload of saved slots');
     const persisted = await (await context.request.get(`${origin}/api/board`)).json();
-    assert.deepEqual(persisted.slots.map((slot: { name: string }) => slot.name), ['Lunch', 'Dinner', 'Breakfast']);
+    assert.deepEqual(persisted.slots.map((slot: { name: string }) => slot.name), ['Lunch', 'Snack', 'Supper', 'Dinner', 'Breakfast']);
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.reload(); await openSlots(page);
     await breakfast.locator('.slot-time').fill('06:00');
-    await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
+    await checkOrder(page, ['Breakfast', 'Lunch', 'Snack', 'Supper', 'Dinner']);
     assert.ok(await page.locator('.slot-edit-row').evaluateAll(rows => rows.every(row => !((row as HTMLElement).style.transform) || (row as HTMLElement).style.transform === 'none')), 'Reduced motion uses immediate layout');
     await page.screenshot({ path: join(output, `slots-${label}-reduced.png`), fullPage: true });
     await page.getByRole('button', { name: 'Revert', exact: true }).click();
+    await checkOrder(page, ['Lunch', 'Snack', 'Supper', 'Dinner', 'Breakfast']);
+    // Each viewport reuses this synthetic database; remove test-only rows so
+    // the next context starts with the same three-slot fixture.
+    await page.locator(`[data-slot-id="${snackId}"] .remove-slot`).click();
+    await page.locator(`[data-slot-id="${supperId}"] .remove-slot`).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.getByRole('button', { name: 'Saved', exact: true }).waitFor();
     await checkOrder(page, ['Lunch', 'Dinner', 'Breakfast']);
     assert.deepEqual(errors, []);
     const video = page.video()!;
