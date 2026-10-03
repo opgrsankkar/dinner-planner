@@ -108,6 +108,7 @@ try {
     assert.ok(await page.getByLabel('Slot label 1', { exact: true }).isVisible(), 'Slot name keeps its accessible field label');
     assert.ok(await page.getByLabel('Slot time 1', { exact: true }).isVisible(), 'Slot time keeps its accessible field label');
     await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
+    assert.ok(await page.getByRole('button', { name: 'Revert', exact: true }).isDisabled(), 'Revert is disabled when slots match the saved baseline');
     await checkSlotRowLayout(page);
     assert.equal(await page.locator('.slot-time').first().getAttribute('type'), 'time', 'Native time input remains enabled');
     for (const theme of ['light', 'dark']) {
@@ -142,11 +143,13 @@ try {
     `);
     await breakfast.locator('.slot-time').fill('20:00');
     await checkOrder(page, ['Lunch', 'Dinner', 'Breakfast']);
+    assert.ok(await page.getByRole('button', { name: 'Revert', exact: true }).isEnabled(), 'Revert is enabled with an unsaved time edit');
     await page.waitForTimeout(950);
     assert.ok(await page.evaluate(() => (window as unknown as { slotSamples: string[] }).slotSamples.some(value => /translate/.test(value) && !/translateY\(0px\)/.test(value))), 'Time edit visibly animates row movement');
     assert.equal(await breakfast.locator('.slot-time').inputValue(), '20:00', 'Stable ID keeps edited value');
     await page.getByRole('button', { name: 'Revert', exact: true }).click();
     await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
+    assert.ok(await page.getByRole('button', { name: 'Revert', exact: true }).isDisabled(), 'Revert is disabled after restoring the saved baseline');
     await breakfast.locator('.slot-time').fill('13:00');
     await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
     assert.ok(await page.getByRole('button', { name: 'Save', exact: true }).isDisabled(), 'Duplicate time invalid');
@@ -180,7 +183,9 @@ try {
     await added.waitFor({ state: 'detached' });
     await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
     assert.ok(await page.getByRole('button', { name: 'Save', exact: true }).isDisabled(), 'Remove added slot restores clean baseline');
+    assert.ok(await page.getByRole('button', { name: 'Revert', exact: true }).isDisabled(), 'Revert is disabled after adding then removing a slot');
     await breakfast.locator('.slot-time').fill('20:00');
+    assert.ok(await page.getByRole('button', { name: 'Revert', exact: true }).isEnabled(), 'Revert is enabled before saving an edit');
     let fail = true;
     await page.route('**/api/settings/slots', async route => {
       await new Promise(resolve => setTimeout(resolve, 600));
@@ -196,9 +201,11 @@ try {
     await page.screenshot({ path: join(output, `slots-${label}-retry.png`), fullPage: true });
     await page.getByRole('button', { name: 'Save failed', exact: true }).click();
     await page.getByRole('button', { name: 'Saved', exact: true }).waitFor();
+    assert.ok(await page.getByRole('button', { name: 'Revert', exact: true }).isDisabled(), 'Revert is disabled after save updates the baseline');
     await page.waitForTimeout(1100);
     await page.reload(); await openSlots(page);
     await checkOrder(page, ['Lunch', 'Dinner', 'Breakfast']);
+    assert.ok(await page.getByRole('button', { name: 'Revert', exact: true }).isDisabled(), 'Revert is disabled after reload of saved slots');
     const persisted = await (await context.request.get(`${origin}/api/board`)).json();
     assert.deepEqual(persisted.slots.map((slot: { name: string }) => slot.name), ['Lunch', 'Dinner', 'Breakfast']);
     await page.emulateMedia({ reducedMotion: 'reduce' });
