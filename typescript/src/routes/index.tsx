@@ -72,6 +72,7 @@ export function Planner() {
   const boardRef = useRef<Board | null>(board);
   boardRef.current = board;
   const changeRef = useRef<(card: Card, kind: "move" | "delete", date?: string, slot?: Slot) => Promise<void>>(async () => {});
+  const clearTouchDragRef = useRef<() => void>(() => {});
   const [signedOut, setSignedOut] = useState(false);
   const [error, setError] = useState("");
   const [password, setPassword] = useState("");
@@ -95,6 +96,7 @@ export function Planner() {
     lastY: number;
     x: number;
     y: number;
+    identifier: number;
     timer: ReturnType<typeof setTimeout>;
     active: boolean;
     scrolling: boolean;
@@ -115,10 +117,22 @@ export function Planner() {
       document.body.classList.remove("planner-dragging", "trash-hover");
       document.querySelectorAll(".meal-cell.touch-drop-hover").forEach((cell) => cell.classList.remove("touch-drop-hover"));
     };
+    clearTouchDragRef.current = clearTouchDrag;
+    const touchStart = (event: TouchEvent) => {
+      if (event.touches.length > 1 && touchDrag.current) clearTouchDrag();
+    };
     const touchMove = (event: TouchEvent) => {
       const drag = touchDrag.current;
-      if (!drag || !event.touches.length) return;
-      const touch = event.touches[0]!;
+      if (!drag) return;
+      if (event.touches.length !== 1) {
+        clearTouchDrag();
+        return;
+      }
+      const touch = Array.from(event.touches).find((item) => item.identifier === drag.identifier);
+      if (!touch) {
+        clearTouchDrag();
+        return;
+      }
       if (!drag.active) {
         if (Math.hypot(touch.clientX - drag.startX, touch.clientY - drag.startY) > 10) {
           clearTimeout(drag.timer);
@@ -148,9 +162,20 @@ export function Planner() {
     const touchEnd = (event: TouchEvent) => {
       const drag = touchDrag.current;
       if (!drag) return;
+      const initiatingTouchEnded = Array.from(event.changedTouches).some((touch) => touch.identifier === drag.identifier);
+      const initiatingTouchStillActive = Array.from(event.touches).some((touch) => touch.identifier === drag.identifier);
+      if (!initiatingTouchEnded) {
+        if (event.touches.length !== 1 || !initiatingTouchStillActive) clearTouchDrag();
+        return;
+      }
+      if (event.touches.length) {
+        clearTouchDrag();
+        return;
+      }
       if (event.changedTouches.length) {
-        drag.x = event.changedTouches[0]!.clientX;
-        drag.y = event.changedTouches[0]!.clientY;
+        const touch = Array.from(event.changedTouches).find((item) => item.identifier === drag.identifier)!;
+        drag.x = touch.clientX;
+        drag.y = touch.clientY;
       }
       const active = drag.active;
       const scrolling = drag.scrolling;
@@ -188,6 +213,7 @@ export function Planner() {
     window.addEventListener("dragend", finishPlannedDrag, true);
     window.addEventListener("drop", finishPlannedDrag, true);
     window.addEventListener("blur", finishPlannedDrag);
+    window.addEventListener("touchstart", touchStart, true);
     window.addEventListener("touchmove", touchMove, { passive: false });
     window.addEventListener("touchend", touchEnd, { passive: false });
     window.addEventListener("touchcancel", cancelTouchDrag);
@@ -196,11 +222,13 @@ export function Planner() {
       window.removeEventListener("dragend", finishPlannedDrag, true);
       window.removeEventListener("drop", finishPlannedDrag, true);
       window.removeEventListener("blur", finishPlannedDrag);
+      window.removeEventListener("touchstart", touchStart, true);
       window.removeEventListener("touchmove", touchMove);
       window.removeEventListener("touchend", touchEnd);
       window.removeEventListener("touchcancel", cancelTouchDrag);
       document.removeEventListener("keydown", cancelPlannedDrag, true);
       finishPlannedDrag();
+      clearTouchDragRef.current = () => {};
     };
   }, []);
 
@@ -468,7 +496,11 @@ export function Planner() {
   }
   changeRef.current = change;
   function startPlannedTouchDrag(card: Card, source: HTMLDivElement, event: React.TouchEvent<HTMLDivElement>) {
-    if (event.touches.length !== 1 || card.state !== "saved" || card.completed) return;
+    if (event.touches.length !== 1 || card.state !== "saved" || card.completed) {
+      if (touchDrag.current) clearTouchDragRef.current();
+      return;
+    }
+    if (touchDrag.current) clearTouchDragRef.current();
     const touch = event.touches[0]!;
     const drag = {
       card,
@@ -479,6 +511,7 @@ export function Planner() {
       lastY: touch.clientY,
       x: touch.clientX,
       y: touch.clientY,
+      identifier: touch.identifier,
       timer: 0 as unknown as ReturnType<typeof setTimeout>,
       active: false,
       scrolling: false,
@@ -839,7 +872,7 @@ export function Planner() {
                                     }
                                   }}
                                   onDragStart={(e) => {
-                                    touchDrag.current = null;
+                                    clearTouchDragRef.current();
                                     dragFinishedCardId.current = null;
                                     dialogTrigger.current = e.currentTarget;
                                     e.dataTransfer.setData(

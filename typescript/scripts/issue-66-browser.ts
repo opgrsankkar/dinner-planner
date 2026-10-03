@@ -246,12 +246,14 @@ try {
     await mobile.waitForTimeout(50);
     await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   };
-  const moveResponse = mobile.waitForResponse((response) => response.url().endsWith("/api/change") && response.request().method() === "POST", { timeout: 10000 });
+  const moveResponse = mobile.waitForResponse((response) => response.url().endsWith("/api/change") && response.request().method() === "POST", { timeout: 10000 })
+    .then((response) => ({ response }), (error: Error) => ({ error }));
   await cdpTouch(
     { x: moveBox.x + moveBox.width / 2, y: moveBox.y + moveBox.height / 2 },
     { x: cellBox.x + cellBox.width / 2, y: cellBox.y + cellBox.height / 2 },
   );
-  await moveResponse;
+  const moveResult = await moveResponse;
+  if ("error" in moveResult) throw moveResult.error;
   await mobile.getByRole("status", { name: "Meal saved", exact: true }).waitFor();
   assert.equal(mobileChanges.length, 1, "touch drag sends one move mutation");
   assert.equal(mobileChanges[0]?.kind, "move");
@@ -263,6 +265,52 @@ try {
   const currentBox = await mobile.locator(".meal-chip").filter({ hasText: touchMealName }).boundingBox();
   assert.ok(currentBox);
   const noUnexpectedChange = mobileChanges.length;
+
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: currentBox.x + currentBox.width / 2, y: currentBox.y + currentBox.height / 2, id: 6 }] });
+  await mobile.waitForTimeout(150);
+  await mobile.evaluate(() => window.dispatchEvent(new Event("blur")));
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+  await mobile.waitForTimeout(500);
+  assert.equal(await mobile.locator("body").evaluate((node) => node.classList.contains("planner-dragging")), false, "blur cancels a pending long-press timer");
+  assert.equal(await mobile.locator("dialog[open]").count(), 0, "canceled pending hold opens no dialog");
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: currentBox.x + currentBox.width / 2, y: currentBox.y + currentBox.height / 2, id: 11 }] });
+  await mobile.waitForTimeout(150);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+  await mobile.waitForTimeout(500);
+  assert.equal(await mobile.locator("body").evaluate((node) => node.classList.contains("planner-dragging")), false, "touchcancel clears a pending long-press timer");
+
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: currentBox.x + currentBox.width / 2, y: currentBox.y + currentBox.height / 2, id: 10 }] });
+  await mobile.waitForTimeout(150);
+  await mobile.locator(".meal-chip").filter({ hasText: touchMealName }).evaluate((node) => node.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: new DataTransfer() })));
+  await mobile.waitForTimeout(500);
+  assert.equal(await mobile.locator(".meal-chip").filter({ hasText: touchMealName }).evaluate((node) => node.classList.contains("is-touch-dragging")), false, "native dragstart clears the pending touch timer and source style");
+  await mobile.locator(".meal-chip").filter({ hasText: touchMealName }).evaluate((node) => node.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: new DataTransfer() })));
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+  assert.equal(await mobile.locator("body").evaluate((node) => node.classList.contains("planner-dragging")), false, "native dragend clears shared drag state");
+
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: currentBox.x + currentBox.width / 2, y: currentBox.y + currentBox.height / 2, id: 7 }] });
+  await mobile.waitForTimeout(600);
+  assert.equal(await mobile.locator("body").evaluate((node) => node.classList.contains("planner-dragging")), true);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: 12, y: 12, id: 7 }] });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  assert.equal(mobileChanges.length, noUnexpectedChange, "releasing the initiating finger outside causes no mutation");
+  assert.equal(await mobile.locator("dialog[open]").count(), 0, "outside release never opens a dialog");
+  assert.equal(await mobile.locator("body").evaluate((node) => node.classList.contains("planner-dragging")), false);
+
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: currentBox.x + currentBox.width / 2, y: currentBox.y + currentBox.height / 2, id: 8 }] });
+  await mobile.waitForTimeout(600);
+  assert.equal(await mobile.locator("body").evaluate((node) => node.classList.contains("planner-dragging")), true);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [
+    { x: currentBox.x + currentBox.width / 2, y: currentBox.y + currentBox.height / 2, id: 8 },
+    { x: 12, y: 12, id: 9 },
+  ] });
+  assert.equal(await mobile.locator("body").evaluate((node) => node.classList.contains("planner-dragging")), false, "a second finger immediately cancels the gesture");
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [{ x: currentBox.x + currentBox.width / 2, y: currentBox.y + currentBox.height / 2, id: 8 }] });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+  assert.equal(mobileChanges.length, noUnexpectedChange, "ending a noninitiating finger cannot commit a mutation");
+  assert.equal(await mobile.locator("dialog[open]").count(), 0, "multi-touch cancellation never opens a dialog");
+  assert.equal(await mobile.locator("body").evaluate((node) => node.classList.contains("trash-hover")), false);
+
   await cdpTouch(
     { x: currentBox.x + currentBox.width / 2, y: currentBox.y + currentBox.height / 2 },
     { x: 12, y: 12 },

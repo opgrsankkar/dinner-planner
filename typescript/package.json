@@ -16,6 +16,7 @@
     "smoke:issue-41": "tsx scripts/issue-41-browser.ts",
     "smoke:issue-42": "tsx scripts/issue-42-browser.ts",
     "smoke:issue-66": "tsx scripts/issue-66-browser.ts",
+    "smoke:issue-66-webkit": "tsx scripts/issue-66-webkit-browser.ts",
     "smoke:issue-67": "tsx scripts/issue-67-browser.ts",
     "check:runtime": "node --import tsx scripts/runtime-check.ts",
     "demo": "mkdir -p .local && npm run db:init && npm run dev",
