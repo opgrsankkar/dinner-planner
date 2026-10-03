@@ -105,22 +105,156 @@ export function MealLibrarySettings({ library, action }: MealLibrarySettingsProp
           {adding ? "Adding…" : "＋ Add Meal"}
         </button>
       </form>
-      <div className="folio-library-list">
-        {library.filter(meal => meal.name.toLowerCase().includes(search.trim().toLowerCase())).map(meal => (
-          <div className="folio-library-row" key={meal.id}>
-            <span className="folio-library-name">{meal.name}</span>
-            <button className="folio-library-remove" type="button"
-              aria-label={`Remove ${meal.name} from library`} disabled={removing.includes(meal.id)}
-              aria-busy={removing.includes(meal.id)} onClick={() => void removeMeal(meal)}>
-              {removing.includes(meal.id) ? <span className="folio-library-spinner" aria-hidden="true" /> :
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-                  <path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7" />
-                </svg>}
-            </button>
-          </div>
+      <div className="folio-library-list" role="list">
+        {library.filter(meal => meal.name.toLowerCase().includes(search.trim().toLowerCase())).map((meal, i) => (
+          <MealRow key={meal.id} meal={meal} action={action}
+            removing={removing.includes(meal.id)}
+            onRemove={() => void removeMeal(meal)}
+            setFeedback={setFeedback} setError={setError}
+            isFirst={i === 0 && !search.trim()} />
         ))}
       </div>
       <div className="folio-library-feedback" role={error ? "alert" : "status"}>{error || feedback}</div>
     </section>
+  );
+}
+
+function MealRow({ meal, action, removing, onRemove, setFeedback, setError, isFirst }: {
+  meal: Meal; action: MealLibrarySettingsProps["action"];
+  removing: boolean; onRemove: () => void;
+  setFeedback: (msg: string) => void; setError: (msg: string) => void;
+  isFirst: boolean;
+}) {
+  const [offset, setOffset] = useState(0);
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState(meal.name);
+  const [saving, setSaving] = useState(false);
+  const touchStart = useRef({ x: 0, y: 0 });
+  const touchState = useRef<'none'|'horizontal'|'vertical'>('none');
+  const [intro, setIntro] = useState(isFirst);
+  const rowRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (intro) {
+      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (reduced) {
+        setIntro(false);
+        return;
+      }
+      const t = setTimeout(() => {
+        if (!rowRef.current) return;
+        const anim = rowRef.current.animate([
+          { transform: "translateX(0)" },
+          { transform: "translateX(-20px)", offset: 0.2 },
+          { transform: "translateX(0)", offset: 0.4 },
+          { transform: "translateX(20px)", offset: 0.6 },
+          { transform: "translateX(0)" }
+        ], { duration: 1200, easing: "ease-in-out" });
+        anim.onfinish = () => setIntro(false);
+      }, 500);
+      return () => clearTimeout(t);
+    }
+  }, [intro]);
+
+  function onTouchStart(e: React.TouchEvent) {
+    if (editing || removing || saving) return;
+    touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    touchState.current = 'none';
+  }
+
+  function onTouchMove(e: React.TouchEvent) {
+    if (editing || removing || saving) return;
+    const dx = e.touches[0].clientX - touchStart.current.x;
+    const dy = e.touches[0].clientY - touchStart.current.y;
+    if (touchState.current === 'none') {
+      if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 5) {
+        touchState.current = 'vertical';
+        return;
+      }
+      if (Math.abs(dx) > 5) {
+        touchState.current = 'horizontal';
+      }
+    }
+    if (touchState.current === 'horizontal') {
+      if (e.cancelable) e.preventDefault();
+      setOffset(Math.max(-80, Math.min(80, dx)));
+    }
+  }
+
+  function onTouchEnd() {
+    if (touchState.current === 'horizontal') {
+      if (offset > 40) setOffset(60);
+      else if (offset < -40) setOffset(-60);
+      else setOffset(0);
+    }
+    touchState.current = 'none';
+  }
+
+  async function saveEdit() {
+    const trimmed = editName.trim();
+    if (!trimmed) {
+      setEditing(false);
+      setEditName(meal.name);
+      return;
+    }
+    if (trimmed === meal.name) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    setError("");
+    setFeedback("");
+    try {
+      if (await action("/api/library/edit", { mealId: meal.id, name: trimmed }) === true) {
+        setFeedback(`Renamed to ${trimmed}.`);
+        setEditing(false);
+        setOffset(0);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not rename meal.");
+      setEditName(meal.name);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="folio-library-row-wrapper" role="listitem">
+      <div className="folio-library-swipe-bg right" aria-hidden="true" onClick={onRemove} style={{ cursor: 'pointer' }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7" /></svg>
+      </div>
+      <div className="folio-library-swipe-bg left" aria-hidden="true" onClick={() => { setEditing(true); setOffset(0); }} style={{ cursor: 'pointer' }}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+      </div>
+      <div className="folio-library-row" ref={rowRef}
+        style={{ transform: `translateX(${offset}px)` }}
+        onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+        
+        {editing ? (
+          <form className="folio-library-edit-form" onSubmit={e => { e.preventDefault(); void saveEdit(); }}>
+            <input autoFocus type="text" value={editName} disabled={saving}
+              onChange={e => setEditName(e.target.value)}
+              onBlur={() => void saveEdit()}
+              onKeyDown={e => { if (e.key === "Escape") { setEditing(false); setEditName(meal.name); } }}
+            />
+          </form>
+        ) : (
+          <>
+            <span className="folio-library-name">{meal.name}</span>
+            <div className="folio-library-actions">
+              <button className="folio-library-edit-btn" type="button" aria-label={`Edit ${meal.name}`}
+                onClick={() => { setEditing(true); setOffset(0); }} disabled={removing}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>
+              </button>
+              <button className="folio-library-remove-btn" type="button" aria-label={`Remove ${meal.name} from library`}
+                disabled={removing} aria-busy={removing} onClick={onRemove}>
+                {removing ? <span className="folio-library-spinner" aria-hidden="true" /> :
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7" /></svg>}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
