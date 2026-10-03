@@ -105,6 +105,10 @@ try {
   await desktop.getByRole("button", { name: "Delete meal", exact: true }).click();
   const confirmation = desktop.getByRole("dialog", { name: "Confirm meal deletion" });
   await confirmation.waitFor();
+  await desktop.keyboard.press("Shift+Tab");
+  assert.equal(await desktop.getByRole("button", { name: "Delete meal", exact: true }).evaluate((node) => node === document.activeElement), true, "delete confirmation wraps Shift+Tab");
+  await desktop.keyboard.press("Tab");
+  assert.equal(await desktop.getByRole("button", { name: "Cancel", exact: true }).evaluate((node) => node === document.activeElement), true, "delete confirmation wraps Tab");
   await desktop.getByRole("button", { name: "Cancel", exact: true }).click();
   await confirmation.waitFor({ state: "hidden" });
   await assertFocusOn(desktop, planned, "canceling delete returns focus to its planned card");

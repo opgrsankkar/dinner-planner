@@ -1,5 +1,5 @@
 import { createFileRoute, useLocation } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { SettingsPage } from "../settings";
 import { WeekPicker } from "../WeekPicker";
 import type { Board, Meal, Card, Slot } from "../types";
@@ -34,6 +34,29 @@ function monday() {
   day.setUTCHours(12, 0, 0, 0);
   day.setUTCDate(day.getUTCDate() - ((day.getUTCDay() + 6) % 7));
   return iso(day);
+}
+function containDialogTab(event: ReactKeyboardEvent<HTMLDialogElement>) {
+  if (event.key !== "Tab") return;
+  const dialog = event.currentTarget;
+  const focusable = Array.from(
+    dialog.querySelectorAll<HTMLElement>(
+      'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter((element) => element.getClientRects().length > 0);
+  const first = focusable[0];
+  const last = focusable.at(-1);
+  if (!first || !last) return;
+  const active = document.activeElement;
+  if (
+    event.shiftKey &&
+    (active === first || active === dialog || active?.id === "plan-title")
+  ) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (active === last || active === dialog)) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 function Icon({ name, spin = false }: { name: string; spin?: boolean }) {
   return (
@@ -875,6 +898,7 @@ export function Planner() {
         ref={deleteDialog}
         className="confirm-dialog"
         aria-label="Confirm meal deletion"
+        onKeyDown={containDialogTab}
         onClose={() => dialogTrigger.current?.focus()}
       >
         <h2>Delete {deleteTarget?.name}?</h2>
@@ -903,6 +927,7 @@ export function Planner() {
         ref={dialog}
         className="confirm-dialog action-dialog"
         aria-labelledby="plan-title"
+        onKeyDown={containDialogTab}
         onClose={() => dialogTrigger.current?.focus()}
       >
         <form
@@ -917,7 +942,7 @@ export function Planner() {
             }
           }}
         >
-          <h2 id="plan-title">
+          <h2 id="plan-title" tabIndex={-1}>
             {moving ? "Move" : "Plan"} {target?.name}
           </h2>
           <p>
