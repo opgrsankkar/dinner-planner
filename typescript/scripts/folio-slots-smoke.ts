@@ -51,12 +51,13 @@ async function checkSlotRowLayout(page: Page) {
     const time = row.locator('.slot-time');
     const remove = row.locator('.remove-slot');
     const [rowGrid, nameBox, timeBox, removeBox] = await Promise.all([
-      row.evaluate(el => getComputedStyle(el).gridTemplateColumns),
+      row.locator('.slot-edit-row-content').evaluate(el => getComputedStyle(el).gridTemplateColumns),
       name.boundingBox(), time.boundingBox(), remove.boundingBox(),
     ]);
-    assert.ok(rowGrid && rowGrid.split(' ').length === 3, `No empty number track: ${rowGrid}`);
+    assert.ok(rowGrid && rowGrid.split(' ').length === 2, `Name and time use two tracks: ${rowGrid}`);
     assert.equal(await page.locator('.folio-slot-head').count(), 0, 'Visible headings remain removed');
     assert.ok(nameBox && timeBox && removeBox, 'All row controls remain visible');
+    assert.ok(removeBox.width >= 44 && removeBox.height >= 44, 'Remove target is at least 44px in both dimensions');
     assert.ok(nameBox.x + nameBox.width <= timeBox.x + 2, 'Name and time do not overlap');
     assert.ok(timeBox.x + timeBox.width <= removeBox.x + 2, 'Time and delete do not overlap');
     assert.ok(
@@ -66,6 +67,66 @@ async function checkSlotRowLayout(page: Page) {
   }
   assert.equal(await page.getByLabel('Slot label 1', { exact: true }).count(), 1, 'Accessible name label remains');
   assert.equal(await page.getByLabel('Slot time 1', { exact: true }).count(), 1, 'Accessible time label remains');
+}
+async function touchSequence(page: Page, points: { type: 'touchStart' | 'touchMove' | 'touchEnd' | 'touchCancel'; x: number; y: number }[]) {
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+    for (const [index, { type, x, y }] of points.entries()) {
+      await cdp.send('Input.dispatchTouchEvent', {
+        type,
+        touchPoints: type === 'touchEnd' || type === 'touchCancel' ? [] : [{ x, y, id: 1 }],
+      });
+      if (index + 1 < points.length) await page.waitForTimeout(40);
+    }
+  } finally {
+    await cdp.detach();
+  }
+}
+async function swipeRow(page: Page, row: import('@playwright/test').Locator, direction: 'left' | 'right' = 'left') {
+  const box = await row.boundingBox();
+  assert.ok(box, 'Swipe row is visible');
+  const x = direction === 'left' ? box.x + box.width - 22 : box.x + 22;
+  const delta = direction === 'left' ? -1 : 1;
+  const y = box.y + box.height / 2;
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] });
+    await page.waitForTimeout(40);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + delta * 45, y, id: 1 }] });
+    await page.waitForTimeout(40);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + delta * 104, y, id: 1 }] });
+    await page.waitForTimeout(40);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  } finally {
+    await cdp.detach();
+  }
+  return row.evaluate(el => el.classList.contains('is-revealed'));
+}
+async function removeDraft(page: Page, row: import('@playwright/test').Locator, mobile: boolean) {
+  const slotId = await row.getAttribute('data-slot-id');
+  assert.ok(slotId, 'Remove target has a stable slot ID');
+  const remove = row.locator('.remove-slot');
+  if (mobile) {
+    assert.equal(await swipeRow(page, row), true, 'Touch swipe reveals the remove action');
+    await page.waitForTimeout(220);
+  }
+  else {
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await row.hover();
+    await page.waitForTimeout(200);
+    const state = await remove.evaluate(el => ({ opacity: getComputedStyle(el).opacity, pointerEvents: getComputedStyle(el).pointerEvents, disabled: (el as HTMLButtonElement).disabled, row: el.parentElement?.className, hover: el.parentElement?.matches(':hover'), focusWithin: el.parentElement?.matches(':focus-within'), hoverMedia: matchMedia('(hover:hover)').matches, finePointer: matchMedia('(pointer:fine)').matches }));
+    assert.equal(state.opacity, '1', `Desktop hover reveals delete: ${JSON.stringify(state)}`);
+  }
+  const hitTest = await remove.evaluate(el => {
+    const box = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+    return { hit: hit?.className?.toString(), matches: hit === el || el.contains(hit), disabled: (el as HTMLButtonElement).disabled };
+  });
+  assert.equal(hitTest.matches, true, `Remove button receives pointer: ${JSON.stringify(hitTest)}`);
+  await remove.click();
+  await page.locator(`[data-slot-id="${slotId}"]`).waitFor({ state: 'detached' });
 }
 try {
   let ready = false;
@@ -77,8 +138,8 @@ try {
   assert.ok(ready, `Server failed: ${logs}`);
   browser = await chromium.launch({ executablePath: process.env.CHROME_PATH ?? '/usr/bin/google-chrome', args: ['--no-sandbox'] });
   for (const { width, mobile } of [
-    { width: 375, mobile: false }, { width: 390, mobile: false }, { width: 1280, mobile: false },
     { width: 375, mobile: true }, { width: 390, mobile: true },
+    { width: 375, mobile: false }, { width: 390, mobile: false }, { width: 1280, mobile: false },
   ]) {
     const label = `${width}${mobile ? "-mobile" : ""}`;
     const setup = await browser.newContext();
@@ -100,6 +161,7 @@ try {
     const context: BrowserContext = await browser.newContext({ storageState, viewport, isMobile: mobile, hasTouch: mobile, recordVideo: { dir: output, size: viewport } });
     const page: Page = await context.newPage();
     page.setDefaultTimeout(10000);
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(`${origin}/settings`);
@@ -110,6 +172,16 @@ try {
     await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
     assert.ok(await page.getByRole('button', { name: 'Revert', exact: true }).isDisabled(), 'Revert is disabled when slots match the saved baseline');
     await checkSlotRowLayout(page);
+    await page.mouse.move(1, 1);
+    if (!mobile && await page.locator('.slot-intro-peek').count()) {
+      await page.waitForTimeout(700);
+      const peek = await page.locator('.slot-edit-row:nth-child(2) .slot-edit-row-content').evaluate(el => ({
+        name: getComputedStyle(el).animationName,
+        transform: getComputedStyle(el).transform,
+      }));
+      assert.equal(peek.name, 'slot-delete-peek', 'Second row runs a one-time left-peek introduction');
+      assert.match(peek.transform, /^matrix\(/, 'Intro animates the row content and reveals its red action behind it');
+    }
     assert.equal(await page.locator('.slot-time').first().getAttribute('type'), 'time', 'Native time input remains enabled');
     for (const theme of ['light', 'dark']) {
       await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme);
@@ -120,6 +192,71 @@ try {
         await checkSlotRowLayout(page);
         await page.screenshot({ path: join(output, `slots-${label}-${theme}-${focus}.png`), fullPage: true });
       }
+      if (mobile) {
+        const sample = page.locator('.slot-edit-row').first();
+        await sample.evaluate(el => el.scrollIntoView({ block: 'center' }));
+        const box = await sample.boundingBox();
+        assert.ok(box, 'First row is visible for touch checks');
+        const x = box.x + box.width / 2;
+        const y = box.y + box.height / 2;
+        await touchSequence(page, [{ type: 'touchStart', x, y }, { type: 'touchEnd', x, y }]);
+        assert.equal(await sample.evaluate(el => el.classList.contains('is-revealed')), false, 'Short touch does not reveal delete');
+        await touchSequence(page, [{ type: 'touchStart', x, y }, { type: 'touchMove', x: x - 65, y }, { type: 'touchCancel', x: x - 65, y }]);
+        assert.equal(await sample.evaluate(el => el.classList.contains('is-revealed')), false, 'Canceled swipe resets the row');
+        await sample.evaluate(el => {
+          (window as Window & { issue30VerticalLog?: unknown[] }).issue30VerticalLog = [];
+          for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel']) {
+            el.addEventListener(type, event => (window as Window & { issue30VerticalLog?: unknown[] }).issue30VerticalLog?.push({ type, x: (event as PointerEvent).clientX, y: (event as PointerEvent).clientY, pointerType: (event as PointerEvent).pointerType }));
+          }
+        });
+        await touchSequence(page, [{ type: 'touchStart', x, y }, { type: 'touchMove', x, y: y + 80 }, { type: 'touchEnd', x, y: y + 80 }]);
+        assert.equal(await sample.evaluate(el => el.classList.contains('is-revealed')), false, 'Vertical touch scroll does not reveal delete');
+        const verticalState = await page.evaluate(() => ({
+          touchAction: getComputedStyle(document.querySelector('.slot-edit-row')!).touchAction,
+          events: (window as Window & { issue30VerticalLog?: { type: string }[] }).issue30VerticalLog,
+          scrollY: window.scrollY,
+        }));
+        assert.equal(verticalState.touchAction, 'pan-y', 'Vertical touch movement remains available to native scrolling');
+        assert.ok(verticalState.events?.some(event => event.type === 'pointercancel'), `Vertical motion cancels the row gesture: ${JSON.stringify(verticalState)}`);
+        const lunchRow = page.locator(`[data-slot-id="${seeded[1].id}"]`);
+        assert.equal(await swipeRow(page, lunchRow), true, 'A deliberate left swipe reveals delete');
+        assert.equal(await swipeRow(page, lunchRow, 'right'), false, 'A right swipe closes the revealed action');
+        await page.waitForTimeout(220);
+        assert.equal(await swipeRow(page, lunchRow), true, 'A second left swipe reveals delete again');
+        await page.waitForTimeout(200);
+        await checkSlotRowLayout(page);
+        for (const theme of ['light', 'dark']) {
+          await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme);
+          await page.waitForTimeout(120);
+          await page.screenshot({ path: join(output, `slots-${label}-swipe-${theme}.png`), fullPage: true });
+        }
+        await lunchRow.locator('.remove-slot').click();
+        await lunchRow.waitFor({ state: 'detached' });
+        await page.getByRole('button', { name: 'Revert', exact: true }).click();
+        await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
+      }
+    }
+    if (!mobile) {
+      while (await page.locator('.slot-edit-row').count() > 1) {
+        await removeDraft(page, page.locator('.slot-edit-row').last(), mobile);
+      }
+      assert.equal(await page.locator('.remove-slot').isDisabled(), true, 'The final meal slot cannot be removed');
+      await page.getByRole('button', { name: 'Revert', exact: true }).click();
+      await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
+    }
+    if (!mobile) {
+      const lunchName = page.locator(`[data-slot-id="${seeded[1].id}"] .slot-name`);
+      await lunchName.focus();
+      const removeButton = page.locator(`[data-slot-id="${seeded[1].id}"] .remove-slot`);
+      await removeButton.waitFor();
+      for (let attempt = 0; attempt < 6; attempt++) {
+        if (await removeButton.evaluate(el => document.activeElement === el)) break;
+        await page.keyboard.press('Tab');
+      }
+      assert.equal(await removeButton.evaluate(el => document.activeElement === el && el.matches(':focus-visible')), true, 'Keyboard focus reaches the remove button');
+      await page.waitForTimeout(200);
+      assert.equal(await removeButton.evaluate(el => getComputedStyle(el).opacity), '1', `Delete action appears on keyboard focus (${await removeButton.evaluate(el => JSON.stringify({ disabled: (el as HTMLButtonElement).disabled, focusVisible: el.matches(':focus-visible'), row: el.parentElement?.className, opacity: getComputedStyle(el).opacity }))})`);
+      await lunchName.focus();
     }
     await page.waitForTimeout(500);
     const actionBoxes = await Promise.all(['+ Add slot', 'Save', 'Revert'].map(name => page.getByRole('button', { name, exact: true }).boundingBox()));
@@ -180,8 +317,7 @@ try {
     await added.locator('.slot-name').fill('Snack');
     await added.locator('.slot-time').fill('16:00');
     await checkOrder(page, ['Snack', 'Breakfast', 'Lunch', 'Dinner']);
-    await added.locator('.remove-slot').click();
-    await added.waitFor({ state: 'detached' });
+    await removeDraft(page, added, mobile);
     await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
     assert.ok(await page.getByRole('button', { name: 'Save', exact: true }).isDisabled(), 'Remove added slot restores clean baseline');
     assert.ok(await page.getByRole('button', { name: 'Revert', exact: true }).isDisabled(), 'Revert is disabled after adding then removing a slot');
@@ -234,6 +370,7 @@ try {
     assert.deepEqual(persisted.slots.map((slot: { name: string }) => slot.name), ['Lunch', 'Snack', 'Supper', 'Dinner', 'Breakfast']);
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.reload(); await openSlots(page);
+    assert.equal(await page.locator('.slot-intro-peek').count(), 0, 'Reduced motion skips the introductory peek');
     await breakfast.locator('.slot-time').fill('06:00');
     await checkOrder(page, ['Breakfast', 'Lunch', 'Snack', 'Supper', 'Dinner']);
     assert.ok(await page.locator('.slot-edit-row').evaluateAll(rows => rows.every(row => !((row as HTMLElement).style.transform) || (row as HTMLElement).style.transform === 'none')), 'Reduced motion uses immediate layout');
@@ -242,8 +379,8 @@ try {
     await checkOrder(page, ['Lunch', 'Snack', 'Supper', 'Dinner', 'Breakfast']);
     // Each viewport reuses this synthetic database; remove test-only rows so
     // the next context starts with the same three-slot fixture.
-    await page.locator(`[data-slot-id="${snackId}"] .remove-slot`).click();
-    await page.locator(`[data-slot-id="${supperId}"] .remove-slot`).click();
+    await removeDraft(page, page.locator(`[data-slot-id="${snackId}"]`), mobile);
+    await removeDraft(page, page.locator(`[data-slot-id="${supperId}"]`), mobile);
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await page.getByRole('button', { name: 'Saved', exact: true }).waitFor();
     await checkOrder(page, ['Lunch', 'Dinner', 'Breakfast']);

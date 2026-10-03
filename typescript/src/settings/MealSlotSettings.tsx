@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import "./MealSlotSettings.css";
 import { sortSlotsByTime, sortSlotsKeepingDraftsOnTop, validSlotTime } from "../slot-order";
@@ -15,12 +16,34 @@ export interface MealSlotSettingsProps {
 
 // Owns the unsaved draft and save lifecycle. Keep mounted during section
 // navigation so switching sections does not discard pending edits.
-export function MealSlotSettings({ initialSlots, initialRevision, post, refresh, setFeedback }: MealSlotSettingsProps) {
+export function MealSlotSettings({ active = false, initialSlots, initialRevision, post, refresh, setFeedback }: MealSlotSettingsProps) {
   const reduced = useReducedMotion();
   const [baseline, setBaseline] = useState(() => sortSlotsByTime(initialSlots));
   const [revision, setRevision] = useState(initialRevision);
   const [slots, setSlots] = useState(() => sortSlotsByTime(initialSlots));
   const [state, setState] = useState("idle");
+  const [introPeek, setIntroPeek] = useState(true);
+  const introStarted = useRef(false);
+  const [revealedSlotId, setRevealedSlotId] = useState<string | null>(null);
+  const [swipe, setSwipe] = useState<{ slotId: string; offset: number } | null>(null);
+  const swipeStart = useRef<{
+    slotId: string;
+    pointerId: number;
+    x: number;
+    y: number;
+    startOffset: number;
+    tracking: boolean;
+  } | null>(null);
+  useEffect(() => {
+    if (!active) {
+      if (introStarted.current) setIntroPeek(false);
+      return;
+    }
+    if (introStarted.current) return;
+    introStarted.current = true;
+    const timer = window.setTimeout(() => setIntroPeek(false), 1600);
+    return () => window.clearTimeout(timer);
+  }, [active]);
   const dirty = JSON.stringify(slots) !== JSON.stringify(baseline);
   const saving = state === "saving";
   const savedIds = new Set(baseline.map(slot => slot.id));
@@ -36,6 +59,55 @@ export function MealSlotSettings({ initialSlots, initialRevision, post, refresh,
       savedIds,
     ));
     setState("idle");
+  }
+  function startTouchSwipe(event: ReactPointerEvent<HTMLDivElement>, slotId: string) {
+    if (event.pointerType !== "touch" || !event.isPrimary || saving) return;
+    swipeStart.current = {
+      slotId,
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      startOffset: revealedSlotId === slotId ? -52 : 0,
+      tracking: false,
+    };
+  }
+  function moveTouchSwipe(event: ReactPointerEvent<HTMLDivElement>) {
+    const start = swipeStart.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    if (!start.tracking) {
+      if (Math.abs(dy) > 10 && Math.abs(dy) >= Math.abs(dx)) {
+        swipeStart.current = null;
+        setRevealedSlotId(null);
+        setSwipe(null);
+        return;
+      }
+      const swipingLeft = start.startOffset === 0 && dx < -10;
+      const swipingRight = start.startOffset < 0 && dx > 10;
+      if ((!swipingLeft && !swipingRight) || Math.abs(dx) <= Math.abs(dy)) return;
+      start.tracking = true;
+      setRevealedSlotId(null);
+    }
+    event.preventDefault();
+    setSwipe({ slotId: start.slotId, offset: Math.max(-52, Math.min(0, start.startOffset + dx)) });
+  }
+  function endTouchSwipe(event: ReactPointerEvent<HTMLDivElement>, canceled = false) {
+    const start = swipeStart.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    swipeStart.current = null;
+    setSwipe(null);
+    if (canceled) {
+      setRevealedSlotId(null);
+      return;
+    }
+    if (start.tracking) {
+      const dx = event.clientX - start.x;
+      const offset = Math.max(-52, Math.min(0, start.startOffset + dx));
+      setRevealedSlotId(offset <= -36 ? start.slotId : null);
+    } else if (start.startOffset === 0) {
+      setRevealedSlotId(null);
+    }
   }
   return (
       <section className="settings-section slot-settings-section folio-slots">
@@ -134,38 +206,48 @@ export function MealSlotSettings({ initialSlots, initialRevision, post, refresh,
           <div className="slot-list">
             <AnimatePresence initial={false}>
             {slots.map((slot, index) => (
-              <motion.div key={slot.id} className="slot-edit-row" data-slot-id={slot.id}
+              <motion.div key={slot.id} data-slot-id={slot.id}
                 layout={reduced ? false : "position"} initial={false}
                 exit={reduced ? undefined : { opacity: 0, height: 0, minHeight: 0 }}
-                transition={{ duration: reduced ? 0 : .4 }}>
-                <label>
-                  <span className="visually-hidden">
-                    Slot label {index + 1}
-                  </span>
-                  <input
-                    className="slot-name"
-                    disabled={saving}
-                    value={slot.name}
-                    maxLength={120}
-                    onChange={(e) => edit(slot.id, { name: e.target.value })}
-                  />
-                </label>
-                <label>
-                  <span className="visually-hidden">Slot time {index + 1}</span>
-                  <input
-                    className="slot-time"
-                    type="time"
-                    disabled={saving}
-                    value={slot.time}
-                    onChange={(e) => edit(slot.id, { time: e.target.value })}
-                  />
-                </label>
+                transition={{ duration: reduced ? 0 : .4 }}
+                className={`slot-edit-row${revealedSlotId === slot.id ? " is-revealed" : ""}${introPeek && index === 1 && !reduced ? " slot-intro-peek" : ""}`}
+                onPointerDown={(event) => startTouchSwipe(event, slot.id)}
+                onPointerMove={moveTouchSwipe}
+                onPointerUp={(event) => endTouchSwipe(event)}
+                onPointerCancel={(event) => endTouchSwipe(event, true)}>
+                <div className="slot-edit-row-content" style={swipe?.slotId === slot.id ? { "--slot-swipe-offset": `${swipe.offset}px` } as CSSProperties : undefined}>
+                  <label>
+                    <span className="visually-hidden">
+                      Slot label {index + 1}
+                    </span>
+                    <input
+                      className="slot-name"
+                      disabled={saving}
+                      value={slot.name}
+                      maxLength={120}
+                      onChange={(e) => edit(slot.id, { name: e.target.value })}
+                    />
+                  </label>
+                  <label>
+                    <span className="visually-hidden">Slot time {index + 1}</span>
+                    <input
+                      className="slot-time"
+                      type="time"
+                      disabled={saving}
+                      value={slot.time}
+                      onChange={(e) => edit(slot.id, { time: e.target.value })}
+                    />
+                  </label>
+                </div>
                 <button
                   type="button"
                   className="remove-slot"
                   aria-label={`Remove slot ${slot.name}`}
                   disabled={saving || slots.length === 1}
+                  onFocus={() => setRevealedSlotId(slot.id)}
+                  onBlur={() => setRevealedSlotId(current => current === slot.id ? null : current)}
                   onClick={() => {
+                    setRevealedSlotId(null);
                     setSlots(current => sortSlotsKeepingDraftsOnTop(
                       current.filter(item => item.id !== slot.id),
                       savedIds,
