@@ -28,6 +28,22 @@ test("Plan uses the exact current slot cutoff and skips earlier times", () => {
   assert.deepEqual(result, { date: "2026-10-07", slotId: "dinner" });
   const exact = defaultPlanPlacement("2026-10-05", [{ id: "at-cutoff", name: "Cutoff", time: "18:00" }], [], new Date("2026-10-07T12:30:00Z"));
   assert.deepEqual(exact, { date: "2026-10-07", slotId: "at-cutoff" });
+  const lastSecondOfMinute = defaultPlanPlacement("2026-10-05", [{ id: "at-cutoff", name: "Cutoff", time: "18:00" }], [], new Date("2026-10-07T12:30:59Z"));
+  assert.deepEqual(lastSecondOfMinute, { date: "2026-10-07", slotId: "at-cutoff" });
+  const nextMinute = defaultPlanPlacement("2026-10-05", [{ id: "at-cutoff", name: "Cutoff", time: "18:00" }], [], new Date("2026-10-07T12:31:00Z"));
+  assert.deepEqual(nextMinute, { date: "2026-10-08", slotId: "at-cutoff" });
+});
+
+test("when today's later slot is occupied, Plan advances to the next day", () => {
+  assert.deepEqual(
+    defaultPlanPlacement(
+      "2026-10-05",
+      slots,
+      [card("2026-10-07", "19:00")],
+      new Date("2026-10-07T12:30:00Z"),
+    ),
+    { date: "2026-10-08", slotId: "breakfast" },
+  );
 });
 
 test("occupied slots are skipped, including pending creations and deletes", () => {
@@ -53,10 +69,15 @@ test("slot identity keeps a renamed-time card in its occupied cell", () => {
   );
 });
 
-test("future, past and full viewed weeks do not claim an unavailable global default", () => {
-  assert.equal(
-    defaultPlanPlacement("2026-10-12", slots, [], new Date("2026-10-07T12:30:00Z")),
-    null,
+test("future viewed weeks suggest their earliest empty slot; past and full weeks have no default", () => {
+  assert.deepEqual(
+    defaultPlanPlacement(
+      "2026-10-12",
+      slots,
+      [card("2026-10-12", "08:00", { state: "pending" })],
+      new Date("2026-10-07T12:30:00Z"),
+    ),
+    { date: "2026-10-12", slotId: "lunch" },
   );
   assert.equal(
     defaultPlanPlacement("2026-09-28", slots, [], new Date("2026-10-07T12:30:00Z")),

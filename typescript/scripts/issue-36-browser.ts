@@ -129,6 +129,16 @@ try {
   await dialog.waitFor({ state: "hidden" });
   await assertFocusOn(desktop, mealButton, "Plan cancel returns focus to its library control");
 
+  // The cutoff is minute-granular: 19:00:59 remains eligible, while 19:01 skips it.
+  await setClock(desktop, "2026-10-07T13:30:59Z");
+  dialog = await openPlan(desktop, mealName);
+  await assertPlan(desktop, "2026-10-07", slotId("19:00"));
+  await desktop.getByRole("button", { name: "Cancel", exact: true }).click();
+  await setClock(desktop, "2026-10-07T13:31:00Z");
+  dialog = await openPlan(desktop, mealName);
+  await assertPlan(desktop, "2026-10-08", slotId("08:00"));
+  await desktop.getByRole("button", { name: "Cancel", exact: true }).click();
+
   // The exact cutoff is still eligible. New time and board data are read on reopening.
   await setClock(desktop, "2026-10-07T13:30:00Z");
   fixtureCards = [syntheticCard("2026-10-07", "19:00"), syntheticCard("2026-10-08", "08:00", true)];
@@ -164,11 +174,10 @@ try {
 
   fixtureCards = [];
   await desktop.getByRole("button", { name: "Next week", exact: true }).click();
+  fixtureCards = [syntheticCard("2026-10-12", "08:00")];
   await desktop.waitForTimeout(650);
   dialog = await openPlan(desktop, mealName);
-  assert.equal(await desktop.locator("#plan-day").inputValue(), "");
-  assert.equal(await desktop.locator("#plan-slot").inputValue(), "");
-  assert.match(await dialog.innerText(), /Default suggestions are limited to the current week/);
+  await assertPlan(desktop, "2026-10-12", slotId("13:00"));
   await desktop.getByRole("button", { name: "Cancel", exact: true }).click();
   await desktop.getByRole("button", { name: "Previous week", exact: true }).click();
   await desktop.getByRole("button", { name: "Previous week", exact: true }).click();

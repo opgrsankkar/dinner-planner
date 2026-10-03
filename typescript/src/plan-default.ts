@@ -18,10 +18,9 @@ export function defaultPlanPlacement(
   const value = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((part) => part.type === type)?.value ?? "";
   const today = `${value("year")}-${value("month")}-${value("day")}`;
+  // Slots are configured to minute precision, so eligibility intentionally uses
+  // HH:mm: a slot at 19:00 remains eligible through 19:00:59.
   const currentTime = `${value("hour")}:${value("minute")}`;
-  // The modal only offers dates from its displayed week. Do not claim a global
-  // default from another week when that date cannot be selected here.
-  if (week > today) return null;
   const chronologicalSlots = [...slots].sort((a, b) => a.time.localeCompare(b.time));
 
   for (let offset = 0; offset < 7; offset++) {

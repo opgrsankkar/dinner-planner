@@ -925,9 +925,7 @@ export function Planner() {
               ? "Choose a day and meal slot. You can also drag meals on the planner."
               : planDefaultAvailable
                 ? "Choose a day and meal slot. You can also drag meals on the planner."
-                : week > today()
-                  ? "Default suggestions are limited to the current week. Choose a day and slot manually, or return to this week."
-                  : "No eligible empty slot is available in this displayed week. Suggestions are limited to the displayed week. Choose a day and slot manually, or view another week."}
+                : "No eligible empty slot is available in this displayed week. Choose a day and slot manually, or view another week."}
           </p>
           <label htmlFor="plan-day">Day</label>
           <select
