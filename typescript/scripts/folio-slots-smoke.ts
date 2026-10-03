@@ -59,6 +59,10 @@ async function checkSlotRowLayout(page: Page) {
     assert.ok(nameBox && timeBox && removeBox, 'All row controls remain visible');
     assert.ok(nameBox.x + nameBox.width <= timeBox.x + 2, 'Name and time do not overlap');
     assert.ok(timeBox.x + timeBox.width <= removeBox.x + 2, 'Time and delete do not overlap');
+    assert.ok(
+      Math.abs(nameBox.y + nameBox.height - timeBox.y - timeBox.height) <= 1,
+      'Name and time underlines align within one CSS pixel',
+    );
   }
   assert.equal(await page.getByLabel('Slot label 1', { exact: true }).count(), 1, 'Accessible name label remains');
   assert.equal(await page.getByLabel('Slot time 1', { exact: true }).count(), 1, 'Accessible time label remains');
@@ -105,6 +109,17 @@ try {
     assert.ok(await page.getByLabel('Slot time 1', { exact: true }).isVisible(), 'Slot time keeps its accessible field label');
     await checkOrder(page, ['Breakfast', 'Lunch', 'Dinner']);
     await checkSlotRowLayout(page);
+    assert.equal(await page.locator('.slot-time').first().getAttribute('type'), 'time', 'Native time input remains enabled');
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme);
+      for (const focus of ['unfocused', 'focused']) {
+        if (focus === 'focused') await page.locator('.slot-time').first().focus();
+        else await page.locator('.slot-time').first().evaluate(input => input.blur());
+        await page.waitForTimeout(250);
+        await checkSlotRowLayout(page);
+        await page.screenshot({ path: join(output, `slots-${label}-${theme}-${focus}.png`), fullPage: true });
+      }
+    }
     await page.waitForTimeout(500);
     const actionBoxes = await Promise.all(['+ Add slot', 'Save', 'Revert'].map(name => page.getByRole('button', { name, exact: true }).boundingBox()));
     assert.ok(actionBoxes.every(box => box && Math.abs(box.y - actionBoxes[0]!.y) < 3), 'All actions on one line');
