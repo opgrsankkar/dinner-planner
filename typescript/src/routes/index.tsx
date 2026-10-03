@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { SettingsPage } from "../settings";
 import { WeekPicker } from "../WeekPicker";
 import type { Board, Meal, Card, Slot } from "../types";
+import { defaultPlanPlacement } from "../plan-default";
 export const Route = createFileRoute("/")({ component: Planner });
 type Intent = {
   requestId: string;
@@ -128,6 +129,7 @@ export function Planner() {
   const [target, setTarget] = useState<Meal | null>(null);
   const [day, setDay] = useState(week);
   const [slotId, setSlotId] = useState("");
+  const [planDefaultAvailable, setPlanDefaultAvailable] = useState(true);
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [theme, setTheme] = useState("system");
@@ -366,8 +368,10 @@ export function Planner() {
     dialogTrigger.current = trigger;
     setMoving(null);
     setTarget(meal);
-    setDay(week);
-    setSlotId(board!.slots[0].id);
+    const placement = defaultPlanPlacement(week, board!.slots, board!.cards, new Date());
+    setDay(placement?.date ?? "");
+    setSlotId(placement?.slotId ?? "");
+    setPlanDefaultAvailable(placement !== null);
     dialog.current?.showModal();
   }
   function openCardActions(card: Card, trigger: HTMLDivElement) {
@@ -376,6 +380,7 @@ export function Planner() {
     setMoving(card);
     setDay(card.date);
     setSlotId(card.slotId ?? board!.slots[0].id);
+    setPlanDefaultAvailable(true);
     dialog.current?.showModal();
   }
   function requestDelete(card: Card) {
@@ -916,7 +921,11 @@ export function Planner() {
             {moving ? "Move" : "Plan"} {target?.name}
           </h2>
           <p>
-            Choose a day and meal slot. You can also drag meals on the planner.
+            {moving
+              ? "Choose a day and meal slot. You can also drag meals on the planner."
+              : planDefaultAvailable
+                ? "Choose a day and meal slot. You can also drag meals on the planner."
+                : "No eligible empty slot is available in this displayed week. Choose a day and slot manually, or view another week."}
           </p>
           <label htmlFor="plan-day">Day</label>
           <select
@@ -924,6 +933,7 @@ export function Planner() {
             value={day}
             onChange={(e) => setDay(e.target.value)}
           >
+            {!moving && <option value="">Choose a day</option>}
             {days.map((d) => (
               <option key={d.iso} value={d.iso}>
                 {d.name}, {d.label}
@@ -936,6 +946,7 @@ export function Planner() {
             value={slotId}
             onChange={(e) => setSlotId(e.target.value)}
           >
+            {!moving && <option value="">Choose a meal slot</option>}
             {board.slots.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
@@ -959,7 +970,7 @@ export function Planner() {
             >
               Cancel
             </button>
-            <button className="primary-button">
+            <button className="primary-button" disabled={!moving && (!day || !slotId)}>
               {moving ? "Move meal" : "Plan meal"}
             </button>
           </div>
