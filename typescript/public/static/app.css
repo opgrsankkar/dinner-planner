@@ -103,6 +103,9 @@ html[data-theme=dark]{--paper:#352b32;--rail:#2a2328;--cream:#4d3b46;--pink:#664
 .confirm-dialog,.login-card{border:1px solid var(--ink);border-radius:5px;box-shadow:4px 4px 0 var(--ink)}
 .confirm-dialog select,.login-form input{border-color:var(--ink);border-radius:5px}
 .confirm-dialog .primary-button{min-height:40px;padding:10px 14px}
+.confirm-dialog.action-dialog .danger-button{min-width:44px;min-height:44px;padding:10px 14px;border:1px solid var(--ink);border-radius:5px;background:color-mix(in srgb,var(--pink) 76%,#b6485b);color:var(--ink);box-shadow:2px 2px 0 var(--ink);font-weight:700;transition:transform .12s,box-shadow .12s}
+.confirm-dialog.action-dialog .danger-button:focus-visible{outline:3px solid var(--ink);outline-offset:3px}
+.confirm-dialog.action-dialog .danger-button:disabled{opacity:.55;cursor:not-allowed;transform:none;box-shadow:2px 2px 0 var(--ink)}
 
 .settings-shell{max-width:1200px;margin:0 auto;padding:0 24px;min-height:calc(100vh - 90px)}
 .settings-menu-title{display:none}
