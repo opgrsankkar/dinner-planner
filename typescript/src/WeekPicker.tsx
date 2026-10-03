@@ -1,8 +1,8 @@
 import { useRef } from "react";
 import { addDays, calendarWeeks, dateLabel, weekStart } from "./week-calendar";
 
-export function WeekPicker({ week, today, label, onSelect }: {
-  week: string; today: string; label: string; onSelect: (week: string) => void;
+export function WeekPicker({ week, today, label, isCurrent, onSelect }: {
+  week: string; today: string; label: string; isCurrent: boolean; onSelect: (week: string) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -16,8 +16,9 @@ export function WeekPicker({ week, today, label, onSelect }: {
     row?.scrollIntoView({ block: "center", behavior: "instant" });
   }
   return <>
-    <button ref={trigger} type="button" className="week-title week-picker-trigger" aria-haspopup="dialog" onClick={open}>
-      {label}<span className="visually-hidden">, choose week</span>
+    <button ref={trigger} type="button" className="week-title week-picker-trigger" aria-label={`${label}, choose week`} aria-haspopup="dialog" onClick={open}>
+      <span>{label}</span>
+      {isCurrent && <span className="week-current-marker" aria-hidden="true">(current)</span>}
     </button>
     <dialog ref={dialog} className="confirm-dialog week-picker" aria-labelledby="week-picker-title"
       onClose={() => trigger.current?.focus({ preventScroll: true })}
