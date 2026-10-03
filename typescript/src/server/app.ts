@@ -175,6 +175,7 @@ export async function handle(
         "/api/settings/slots",
         "/api/settings/theme",
         "/api/library/remove",
+        "/api/library/edit",
         "/api/library/shuffle",
       ].includes(url.pathname)
     ) {
@@ -211,6 +212,8 @@ export async function handle(
         await store.saveTheme(theme);
       } else if (url.pathname === "/api/library/remove")
         await store.removeLibrary(string("mealId"));
+      else if (url.pathname === "/api/library/edit")
+        await store.editLibrary(string("mealId"), string("name"));
       else if (url.pathname === "/api/library/shuffle") await store.shuffle();
       else {
         if (
