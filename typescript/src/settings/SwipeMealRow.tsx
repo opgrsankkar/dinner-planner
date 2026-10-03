@@ -22,8 +22,8 @@ export function SwipeMealRow({ meal, hint, removing, remove, action }: {
       observer.disconnect();
       const surface = row.current?.querySelector(".folio-library-surface");
       if (surface) animation.current = surface.animate([
-        { transform: "translateX(0)" }, { transform: "translateX(-56px)" },
-        { transform: "translateX(0)" }, { transform: "translateX(56px)" },
+        { transform: "translateX(0)" }, { transform: "translateX(-48px)" },
+        { transform: "translateX(0)" }, { transform: "translateX(48px)" },
         { transform: "translateX(0)" },
       ], { duration: 1800, delay: 400, easing: "ease-in-out" });
     });
@@ -50,7 +50,7 @@ export function SwipeMealRow({ meal, hint, removing, remove, action }: {
       if (event.target !== event.currentTarget) return;
       if (event.key === "Escape") setOffset(0);
       if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-        event.preventDefault(); setOffset(event.key === "ArrowLeft" ? -56 : 56);
+        event.preventDefault(); setOffset(event.key === "ArrowLeft" ? -48 : 48);
       }
     }}>
     <button type="button" className="folio-library-edit folio-library-swipe-action"
@@ -77,13 +77,13 @@ export function SwipeMealRow({ meal, hint, removing, remove, action }: {
           start.direction = Math.abs(dx) > Math.abs(dy) * 1.5 ? "horizontal" : "vertical";
           if (start.direction === "horizontal") event.currentTarget.setPointerCapture(event.pointerId);
         }
-        if (start.direction === "horizontal") setOffset(Math.max(-56, Math.min(56, dx)));
+        if (start.direction === "horizontal") setOffset(Math.max(-48, Math.min(48, dx)));
       }}
       onPointerUp={event => {
         const start = gesture.current;
         if (!start || start.id !== event.pointerId) return;
         const dx = event.clientX - start.x;
-        setOffset(start.direction === "horizontal" && Math.abs(dx) >= 40 ? Math.sign(dx) * 56 : 0);
+        setOffset(start.direction === "horizontal" && Math.abs(dx) >= 40 ? Math.sign(dx) * 48 : 0);
         gesture.current = null;
       }}
       onPointerCancel={() => { gesture.current = null; setOffset(0); }}>

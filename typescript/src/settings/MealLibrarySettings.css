@@ -18,17 +18,18 @@
 @media (max-width: 700px) { .folio-library .folio-library-tools { gap: 10px; } .folio-library .folio-library-tools input { font-size: 16px; } .folio-library .folio-library-add { font-size: 13px; } .folio-library .folio-library-name { font-size: 21px; } }
 @media (prefers-reduced-motion: reduce) { .folio-library .folio-library-spinner { animation: none !important; } }
 .folio-library .folio-library-row { position: relative; display: block; padding: 0; overflow: hidden; }
-.folio-library .folio-library-surface { position: relative; min-height: 98px; display: flex; align-items: center; padding: 27px 0; background: var(--paper, #fff4e6); touch-action: pan-y; transition: transform .18s ease-out; }
-.folio-library .folio-library-swipe-action { position: absolute; top: 50%; transform: translateY(-50%); width: 56px; height: 56px; border: 0; border-radius: 5px; box-shadow: none; padding: 15px; color: white; display: grid; place-items: center; cursor: pointer; }
+.folio-library .folio-library-surface { position: relative; min-height: 64px; display: flex; align-items: center; padding: 8px 0; background: var(--paper, #fff4e6); touch-action: pan-y; transition: transform .18s ease-out; }
+.folio-library .folio-library-name { font-size: 19px; line-height: 1.25; }
+.folio-library .folio-library-swipe-action { position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; min-width: 44px; min-height: 44px; border: 0; border-radius: 5px; box-shadow: none; padding: 10px; color: white; display: grid; place-items: center; cursor: pointer; }
 .folio-library .folio-library-edit { left: 0; background: #2867ae; }
 .folio-library .folio-library-remove { right: 0; background: #b42335; }
 .folio-library .folio-library-swipe-action svg { width: 24px; height: 24px; }
-.folio-library .folio-library-row:is(:focus-visible, :has(button:focus-visible)):not(.is-editing) .folio-library-surface { padding-left: 64px; padding-right: 64px; background: transparent; pointer-events: none; transform: none !important; }
+.folio-library .folio-library-row:is(:focus-visible, :has(button:focus-visible)):not(.is-editing) .folio-library-surface { padding-left: 52px; padding-right: 52px; background: transparent; pointer-events: none; transform: none !important; }
 .folio-library .folio-library-row:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
 .folio-library .is-editing .folio-library-swipe-action { visibility: hidden; }
 .folio-library .folio-library-rename { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; }
 .folio-library .folio-library-rename input { min-width: 0; flex: 1; width: 100%; background: transparent; color: inherit; border: 1px solid currentColor; padding: 8px; font: inherit; }
 .folio-library .folio-library-rename button { color: inherit; background: var(--pink); border: 1px solid currentColor; border-radius: 4px; min-height: 44px; padding: 8px; }
 .folio-library .folio-library-rename [role=alert] { width: 100%; font-size: 14px; }
-@media (hover: hover) { .folio-library .folio-library-row:hover:not(.is-editing) .folio-library-surface { padding-left: 64px; padding-right: 64px; background: transparent; pointer-events: none; transform: none !important; } }
+@media (hover: hover) { .folio-library .folio-library-row:hover:not(.is-editing) .folio-library-surface { padding-left: 52px; padding-right: 52px; background: transparent; pointer-events: none; transform: none !important; } }
 @media (prefers-reduced-motion: reduce) { .folio-library .folio-library-surface { transition: none !important; } }
