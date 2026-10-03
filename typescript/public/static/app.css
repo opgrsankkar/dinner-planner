@@ -266,3 +266,85 @@ html .folio-slots .slot-edit-row input:focus {
 .library-feedback:empty{display:none}
 .library-feedback[role=alert]{color:#b42335}
 html[data-theme=dark] .library-feedback[role=alert]{color:#ff8c9c}
+.week-picker-dialog {
+  max-width: 90vw;
+  width: max-content;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.week-picker-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.week-picker-header h2 {
+  margin: 0;
+  font-size: 1.1em;
+}
+
+.week-picker-scroll {
+  overflow-y: auto;
+  max-height: 60vh;
+  padding: 16px;
+}
+
+.week-row {
+  display: flex;
+  align-items: stretch;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.week-row:hover {
+  background: var(--surface-2);
+}
+
+.week-row.selected-week {
+  background: var(--pink);
+  color: var(--ink);
+}
+
+.week-row.selected-week .other-month-day {
+  color: inherit;
+  opacity: 0.7;
+}
+
+.month-label-col {
+  width: 60px;
+  flex-shrink: 0;
+  font-family: 'Liberation Sans Narrow', 'Arial Narrow', Impact, sans-serif;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  font-size: 1.1em;
+  color: var(--muted);
+}
+
+.days-col {
+  display: flex;
+  flex-grow: 1;
+}
+
+.day-cell {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9em;
+}
+
+.current-month-day {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.other-month-day {
+  color: var(--muted);
+}

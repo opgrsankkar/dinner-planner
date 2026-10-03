@@ -1,6 +1,7 @@
 import { createFileRoute, useLocation } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SettingsPage } from "../settings";
+import { WeekPickerModal } from "../WeekPicker";
 import type { Board, Meal, Card, Slot } from "../types";
 export const Route = createFileRoute("/")({ component: Planner });
 type Intent = {
@@ -49,6 +50,7 @@ export function Planner() {
   const [password, setPassword] = useState("");
   const [search, setSearch] = useState("");
   const [libraryAdding, setLibraryAdding] = useState(false);
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [libraryInvalid, setLibraryInvalid] = useState(false);
   const [libraryFeedback, setLibraryFeedback] = useState("");
   const [libraryError, setLibraryError] = useState("");
@@ -403,9 +405,22 @@ export function Planner() {
             >
               ‹
             </button>
-            <span className="week-title">
+            <button
+              type="button"
+              className="week-title"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+              onClick={() => setIsPickerOpen(true)}
+              aria-haspopup="dialog"
+              aria-expanded={isPickerOpen}
+            >
               {days[0].label} – {days[6].label}
-            </span>
+            </button>
+            <WeekPickerModal
+              isOpen={isPickerOpen}
+              onClose={() => setIsPickerOpen(false)}
+              selectedWeekIso={week}
+              onSelect={(isoDate) => setWeek(isoDate)}
+            />
             <button
               className="icon-button"
               aria-label="Next week"
