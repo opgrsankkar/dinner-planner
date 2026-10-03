@@ -58,6 +58,25 @@ export function Planner() {
   const libraryAnimations = useRef<Animation[]>([]);
   const libraryDragged = useRef(false);
   useEffect(() => () => libraryAnimations.current.forEach(animation => animation.cancel()), []);
+  useEffect(() => {
+    const finishPlannedDrag = () => {
+      document.body.classList.remove("planner-dragging", "trash-hover");
+    };
+    const cancelPlannedDrag = (event: KeyboardEvent) => {
+      if (event.key === "Escape") finishPlannedDrag();
+    };
+    window.addEventListener("dragend", finishPlannedDrag, true);
+    window.addEventListener("drop", finishPlannedDrag, true);
+    window.addEventListener("blur", finishPlannedDrag);
+    document.addEventListener("keydown", cancelPlannedDrag, true);
+    return () => {
+      window.removeEventListener("dragend", finishPlannedDrag, true);
+      window.removeEventListener("drop", finishPlannedDrag, true);
+      window.removeEventListener("blur", finishPlannedDrag);
+      document.removeEventListener("keydown", cancelPlannedDrag, true);
+      finishPlannedDrag();
+    };
+  }, []);
 
   function animateLibraryInvalid(reset = false) {
     const field = libraryInput.current;
@@ -762,7 +781,7 @@ export function Planner() {
                 }
               }}
             >
-              <span aria-hidden="true">▤</span>
+              <Icon name="trash-2" />
             </div>
             <div className="library-list">
               {board.library
