@@ -56,6 +56,15 @@ try {
   const libraryMeal = desktop.locator(".library-chip").first();
   const plannedName = (await libraryMeal.innerText()).replace("⠿", "").trim();
   await libraryMeal.click();
+  let actionDialog = desktop.getByRole("dialog", { name: `Plan ${plannedName}` });
+  await actionDialog.waitFor();
+  assert.equal(await actionDialog.getByRole("button", { name: "Delete meal" }).count(), 0, "planning an unplanned library meal has no delete action");
+  await desktop.screenshot({ path: join(screenshots, "desktop-light-plan-dialog.png"), fullPage: true });
+  await desktop.getByRole("button", { name: "Cancel", exact: true }).click();
+  await actionDialog.waitFor({ state: "hidden" });
+  await assertFocusOn(desktop, libraryMeal, "closing Plan returns focus to its library button");
+
+  await libraryMeal.click();
   await desktop.getByRole("button", { name: "Plan meal", exact: true }).click();
   let planned = desktop.locator(".meal-chip").filter({ hasText: plannedName });
   await planned.waitFor();
@@ -70,14 +79,24 @@ try {
     await route.continue();
   });
   await planned.click();
-  let actionDialog = desktop.getByRole("dialog", { name: `Move ${plannedName}` });
+  actionDialog = desktop.getByRole("dialog", { name: `Move ${plannedName}` });
   await actionDialog.waitFor();
+  assert.equal(await actionDialog.getByRole("button", { name: "Delete meal" }).count(), 1, "planned-meal actions offer confirmed deletion");
   await desktop.screenshot({ path: join(screenshots, "desktop-light-actions.png"), fullPage: true });
   for (let index = 0; index < 6; index++) await desktop.keyboard.press("Tab");
   assert.equal(await actionDialog.evaluate((node) => node.contains(document.activeElement)), true, "Tab remains in the modal dialog");
   await desktop.keyboard.press("Escape");
   await actionDialog.waitFor({ state: "hidden" });
-  await assertFocusOnCard(desktop, planned);
+  await assertFocusOn(desktop, planned, "closing Move returns focus to its planned card");
+
+  // Opening Plan after a planned-card dialog must replace the prior focus target.
+  await libraryMeal.click();
+  actionDialog = desktop.getByRole("dialog", { name: `Plan ${plannedName}` });
+  await actionDialog.waitFor();
+  assert.equal(await actionDialog.getByRole("button", { name: "Delete meal" }).count(), 0, "Plan remains non-destructive after Move was opened");
+  await desktop.getByRole("button", { name: "Cancel", exact: true }).click();
+  await actionDialog.waitFor({ state: "hidden" });
+  await assertFocusOn(desktop, libraryMeal, "Cancel returns focus to the current library button, not a previous meal card");
 
   await planned.focus();
   await desktop.keyboard.press("Enter");
@@ -88,7 +107,7 @@ try {
   await confirmation.waitFor();
   await desktop.getByRole("button", { name: "Cancel", exact: true }).click();
   await confirmation.waitFor({ state: "hidden" });
-  await assertFocusOnCard(desktop, planned);
+  await assertFocusOn(desktop, planned, "canceling delete returns focus to its planned card");
 
   await planned.click();
   await desktop.locator("#plan-day").selectOption({ index: 1 });
@@ -140,6 +159,12 @@ try {
   await desktop.screenshot({ path: join(screenshots, "desktop-dark.png"), fullPage: true });
 
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await mobile.addInitScript(() => {
+    const report = { taps: [] as boolean[], moves: [] as boolean[] };
+    Object.assign(window, { issue42TouchReport: report });
+    document.addEventListener("touchstart", (event) => report.taps.push(event.isTrusted), true);
+    document.addEventListener("touchmove", (event) => report.moves.push(event.isTrusted), true);
+  });
   await login(mobile);
   await mobile.emulateMedia({ colorScheme: "light" });
   await mobile.waitForFunction(() => document.documentElement.dataset.theme === "light");
@@ -147,11 +172,9 @@ try {
   await mobilePlanned.waitFor();
   assert.equal(await mobilePlanned.getAttribute("draggable"), "false", "touch card stays scrollable");
   await mobile.screenshot({ path: join(screenshots, "mobile-light.png"), fullPage: true });
-  const bounds = await mobilePlanned.boundingBox();
-  assert.ok(bounds);
-  const cdp = await mobile.context().newCDPSession(mobile);
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2, id: 1 }] });
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await mobilePlanned.tap();
+  const trustedTaps = await mobile.evaluate(() => (window as unknown as { issue42TouchReport: { taps: boolean[] } }).issue42TouchReport.taps);
+  assert.ok(trustedTaps.length > 0 && trustedTaps.every(Boolean), "mobile tap uses trusted browser touch input");
   const mobileDialog = mobile.getByRole("dialog", { name: `Move ${plannedName}` });
   await mobileDialog.waitFor();
   await mobile.screenshot({ path: join(screenshots, "mobile-light-actions.png"), fullPage: true });
@@ -160,6 +183,7 @@ try {
 
   const scrollBox = await mobilePlanned.boundingBox();
   assert.ok(scrollBox);
+  const cdp = await mobile.context().newCDPSession(mobile);
   const beforeScroll = await mobile.evaluate(() => window.scrollY);
   await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: scrollBox.x + scrollBox.width / 2, y: scrollBox.y + scrollBox.height / 2, id: 1 }] });
   for (let step = 1; step <= 5; step++) {
@@ -169,6 +193,8 @@ try {
   await mobile.waitForTimeout(100);
   assert.equal(await mobile.locator("dialog[open]").count(), 0, "scrolling a touch card does not open the dialog");
   assert.ok((await mobile.evaluate(() => window.scrollY)) > beforeScroll, "touch scroll remains available on a planned card");
+  const trustedMoves = await mobile.evaluate(() => (window as unknown as { issue42TouchReport: { moves: boolean[] } }).issue42TouchReport.moves);
+  assert.ok(trustedMoves.length > 0 && trustedMoves.every(Boolean), "mobile scroll uses trusted browser touch movement");
   await mobile.emulateMedia({ colorScheme: "dark" });
   await mobile.waitForFunction(() => document.documentElement.dataset.theme === "dark");
   await mobile.screenshot({ path: join(screenshots, "mobile-dark.png"), fullPage: true });
@@ -205,6 +231,6 @@ try {
   await rm(directory, { recursive: true, force: true });
 }
 
-async function assertFocusOnCard(page: Page, card: ReturnType<Page["locator"]>) {
-  assert.equal(await card.evaluate((node) => node === document.activeElement), true, "closing the dialog returns focus to its card");
+async function assertFocusOn(page: Page, trigger: ReturnType<Page["locator"]>, description: string) {
+  assert.equal(await trigger.evaluate((node) => node === document.activeElement), true, description);
 }

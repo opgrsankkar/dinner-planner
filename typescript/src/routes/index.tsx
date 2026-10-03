@@ -139,7 +139,7 @@ export function Planner() {
   );
   const dialog = useRef<HTMLDialogElement>(null);
   const deleteDialog = useRef<HTMLDialogElement>(null);
-  const actionTrigger = useRef<HTMLDivElement | null>(null);
+  const dialogTrigger = useRef<HTMLElement | null>(null);
   const dragFinishedAt = useRef(0);
   const dragFinishedCardId = useRef<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Card | null>(null);
@@ -362,7 +362,8 @@ export function Planner() {
     date.setUTCDate(date.getUTCDate() + offset);
     setWeek(iso(date));
   }
-  function openPlan(meal: Meal) {
+  function openPlan(meal: Meal, trigger: HTMLButtonElement) {
+    dialogTrigger.current = trigger;
     setMoving(null);
     setTarget(meal);
     setDay(week);
@@ -370,7 +371,7 @@ export function Planner() {
     dialog.current?.showModal();
   }
   function openCardActions(card: Card, trigger: HTMLDivElement) {
-    actionTrigger.current = trigger;
+    dialogTrigger.current = trigger;
     setTarget(card);
     setMoving(card);
     setDay(card.date);
@@ -676,7 +677,7 @@ export function Planner() {
                                   }}
                                   onDragStart={(e) => {
                                     dragFinishedCardId.current = null;
-                                    actionTrigger.current = e.currentTarget;
+                                    dialogTrigger.current = e.currentTarget;
                                     e.dataTransfer.setData(
                                       "application/x-planned-meal",
                                       card.id,
@@ -852,9 +853,9 @@ export function Planner() {
                       e.dataTransfer.setData("application/x-meal-library", meal.id);
                     }}
                     onDragEnd={(e) => { e.currentTarget.classList.remove("is-dragging"); }}
-                    onClick={() => {
+                    onClick={(e) => {
                       if (libraryDragged.current) return;
-                      openPlan(meal);
+                      openPlan(meal, e.currentTarget);
                     }}
                   >
                     <span className="drag-grip" aria-hidden="true">⠿</span>
@@ -869,7 +870,7 @@ export function Planner() {
         ref={deleteDialog}
         className="confirm-dialog"
         aria-label="Confirm meal deletion"
-        onClose={() => actionTrigger.current?.focus()}
+        onClose={() => dialogTrigger.current?.focus()}
       >
         <h2>Delete {deleteTarget?.name}?</h2>
         <p>This removes the planned meal from Todoist.</p>
@@ -897,7 +898,7 @@ export function Planner() {
         ref={dialog}
         className="confirm-dialog action-dialog"
         aria-labelledby="plan-title"
-        onClose={() => actionTrigger.current?.focus()}
+        onClose={() => dialogTrigger.current?.focus()}
       >
         <form
           className="planner-action-form"
@@ -942,13 +943,15 @@ export function Planner() {
             ))}
           </select>
           <div className="dialog-actions">
-            <button
-              className="danger-button"
-              type="button"
-              onClick={() => { if (moving) requestDelete(moving); }}
-            >
-              Delete meal
-            </button>
+            {moving && (
+              <button
+                className="danger-button"
+                type="button"
+                onClick={() => requestDelete(moving)}
+              >
+                Delete meal
+              </button>
+            )}
             <button
               className="secondary-button"
               type="button"
