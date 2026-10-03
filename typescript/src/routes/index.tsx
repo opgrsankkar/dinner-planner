@@ -132,8 +132,16 @@ export function Planner() {
   const [now, setNow] = useState(Date.now());
   const [theme, setTheme] = useState("system");
   const [effectiveTheme, setEffectiveTheme] = useState("light");
+  const [coarsePointer, setCoarsePointer] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(pointer: coarse)").matches,
+  );
   const dialog = useRef<HTMLDialogElement>(null);
   const deleteDialog = useRef<HTMLDialogElement>(null);
+  const actionTrigger = useRef<HTMLDivElement | null>(null);
+  const dragFinishedAt = useRef(0);
+  const dragFinishedCardId = useRef<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Card | null>(null);
   const local = useRef(new Map<string, Card>());
   const intents = useRef(new Map<string, Intent>());
@@ -208,6 +216,13 @@ export function Planner() {
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
   }, [theme]);
+  useEffect(() => {
+    const media = matchMedia("(pointer: coarse)");
+    const update = () => setCoarsePointer(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
   async function post(path: string, body: unknown) {
     const response = await fetch(path, {
       method: "POST",
@@ -353,6 +368,19 @@ export function Planner() {
     setDay(week);
     setSlotId(board!.slots[0].id);
     dialog.current?.showModal();
+  }
+  function openCardActions(card: Card, trigger: HTMLDivElement) {
+    actionTrigger.current = trigger;
+    setTarget(card);
+    setMoving(card);
+    setDay(card.date);
+    setSlotId(card.slotId ?? board!.slots[0].id);
+    dialog.current?.showModal();
+  }
+  function requestDelete(card: Card) {
+    setDeleteTarget(card);
+    dialog.current?.close();
+    deleteDialog.current?.showModal();
   }
   if (signedOut)
     return (
@@ -600,10 +628,55 @@ export function Planner() {
                               )
                               .map((card) => (
                                 <div
-                                  draggable={
+                                  role={
                                     card.state === "saved" && !card.completed
+                                      ? "button"
+                                      : undefined
                                   }
+                                  tabIndex={
+                                    card.state === "saved" && !card.completed
+                                      ? 0
+                                      : undefined
+                                  }
+                                  aria-label={
+                                    card.state === "saved" && !card.completed
+                                      ? `Move or delete ${card.name}`
+                                      : undefined
+                                  }
+                                  aria-haspopup={
+                                    card.state === "saved" && !card.completed
+                                      ? "dialog"
+                                      : undefined
+                                  }
+                                  draggable={
+                                    card.state === "saved" &&
+                                    !card.completed &&
+                                    !coarsePointer
+                                  }
+                                  onClick={(e) => {
+                                    if (
+                                      dragFinishedCardId.current === card.id &&
+                                      Date.now() - dragFinishedAt.current < 400
+                                    ) {
+                                      dragFinishedCardId.current = null;
+                                      return;
+                                    }
+                                    if (card.state === "saved" && !card.completed)
+                                      openCardActions(card, e.currentTarget);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (
+                                      (e.key === "Enter" || e.key === " ") &&
+                                      card.state === "saved" &&
+                                      !card.completed
+                                    ) {
+                                      e.preventDefault();
+                                      openCardActions(card, e.currentTarget);
+                                    }
+                                  }}
                                   onDragStart={(e) => {
+                                    dragFinishedCardId.current = null;
+                                    actionTrigger.current = e.currentTarget;
                                     e.dataTransfer.setData(
                                       "application/x-planned-meal",
                                       card.id,
@@ -612,12 +685,14 @@ export function Planner() {
                                       "planner-dragging",
                                     );
                                   }}
-                                  onDragEnd={() =>
+                                  onDragEnd={() => {
+                                    dragFinishedAt.current = Date.now();
+                                    dragFinishedCardId.current = card.id;
                                     document.body.classList.remove(
                                       "planner-dragging",
                                       "trash-hover",
-                                    )
-                                  }
+                                    );
+                                  }}
                                   key={card.requestId || card.id}
                                   className={`meal-chip${card.completed ? " is-complete" : ""}${card.state === "pending" ? " is-sync-pending" : ""}${card.deleting ? " is-delete-pending" : ""}`}
                                 >
@@ -625,35 +700,6 @@ export function Planner() {
                                     {card.name}
                                     {card.completed ? " ✓" : ""}
                                   </span>
-                                  {card.state === "saved" &&
-                                    !card.completed && (
-                                      <>
-                                        <button
-                                          className="card-action"
-                                          aria-label={`Move ${card.name}`}
-                                          onClick={() => {
-                                            setTarget(card);
-                                            setMoving(card);
-                                            setDay(card.date);
-                                            setSlotId(
-                                              card.slotId ?? board.slots[0].id,
-                                            );
-                                            dialog.current?.showModal();
-                                          }}
-                                        >
-                                          ↔
-                                        </button>
-                                        <button
-                                          className="card-action"
-                                          aria-label={`Delete ${card.name}`}
-                                          onClick={() =>
-                                            void change(card, "delete")
-                                          }
-                                        >
-                                          ×
-                                        </button>
-                                      </>
-                                    )}
                                   {card.state === "pending" ? (
                                     <button
                                       type="button"
@@ -665,7 +711,8 @@ export function Planner() {
                                           : "Saving meal"
                                       }
                                       title={card.error || "Saving meal"}
-                                      onClick={() => {
+                                      onClick={(e) => {
+                                        e.stopPropagation();
                                         if (intents.current.has(card.requestId))
                                           void sendIntent(card.requestId);
                                         else
@@ -822,12 +869,16 @@ export function Planner() {
         ref={deleteDialog}
         className="confirm-dialog"
         aria-label="Confirm meal deletion"
+        onClose={() => actionTrigger.current?.focus()}
       >
         <h2>Delete {deleteTarget?.name}?</h2>
         <p>This removes the planned meal from Todoist.</p>
         <button
           className="secondary-button"
-          onClick={() => deleteDialog.current?.close()}
+          onClick={() => {
+            deleteDialog.current?.close();
+            setDeleteTarget(null);
+          }}
         >
           Cancel
         </button>
@@ -846,6 +897,7 @@ export function Planner() {
         ref={dialog}
         className="confirm-dialog action-dialog"
         aria-labelledby="plan-title"
+        onClose={() => actionTrigger.current?.focus()}
       >
         <form
           className="planner-action-form"
@@ -890,6 +942,13 @@ export function Planner() {
             ))}
           </select>
           <div className="dialog-actions">
+            <button
+              className="danger-button"
+              type="button"
+              onClick={() => { if (moving) requestDelete(moving); }}
+            >
+              Delete meal
+            </button>
             <button
               className="secondary-button"
               type="button"
