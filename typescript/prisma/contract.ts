@@ -12,6 +12,12 @@ export const contract = defineContract({}, ({ field, model }) => ({
         time: field.column(textColumn),
       },
     }).sql({ table: "slot" }),
+    LocalMeal: model("LocalMeal", {
+      fields: { id: field.id.uuidv4String(), body: field.column(textColumn) },
+    }).sql({ table: "local_meal" }),
+    LocalReceipt: model("LocalReceipt", {
+      fields: { id: field.id.uuidv4String(), body: field.column(textColumn) },
+    }).sql({ table: "local_receipt" }),
     Outbox: model("Outbox", {
       fields: {
         id: field.id.uuidv4String(),

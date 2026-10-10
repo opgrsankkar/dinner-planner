@@ -13,6 +13,7 @@ This is a single-user pet project for experimenting, not a production-hardening 
 - TanStack Start, React, strict TypeScript.
 - Node.js 26, Prisma ORM 8, SQLite. Experimental Prisma SQLite support is explicitly acceptable. Do not substitute Node LTS, Drizzle, PostgreSQL, or another stack without user agreement.
 - Todoist remains authoritative for planned meals. SQLite owns settings, reusable meal library, slots, durable outbox, and temporary cache/optimistic state.
+- The user-authorized standalone deployment is an explicit exception: `TODOIST_MODE=local` makes SQLite authoritative for planned meals and uses no Todoist credentials/network. `compose.local.yaml` uses its own persistent volume. Default/live behavior stays Todoist-backed; switching modes does not migrate planned meals.
 - Retain self-hosted Docker Compose and Caddy deployment unless a concrete implementation requirement warrants a scoped change.
 
 ## Team and execution

@@ -22,13 +22,16 @@ if (!existsSync(db))
   );
 if (!(process.env.APP_PASSWORD ?? process.env.PLANNER_PASSWORD))
   throw new Error("APP_PASSWORD is required");
+if (process.env.TODOIST_MODE && !["live", "fake", "local"].includes(process.env.TODOIST_MODE))
+  throw new Error("Invalid TODOIST_MODE");
 if (
   process.env.TODOIST_MODE !== "fake" &&
+  process.env.TODOIST_MODE !== "local" &&
   !process.env.TODOIST_TOKEN &&
   !process.env.TODOIST_TOKEN_FILE
 )
   throw new Error(
-    "Todoist credentials are required; demo requires TODOIST_MODE=fake",
+    "Todoist credentials are required; standalone storage requires TODOIST_MODE=local, demo requires TODOIST_MODE=fake",
   );
 const { default: handler } = await import("../dist/server/server.js");
 const root = resolve("dist/client");

@@ -5,6 +5,7 @@ import type { Slot } from "../types";
 import { Store, Worker } from "./store";
 import { FakeTodoist } from "./todoist";
 import { TodoistApi } from "./todoist-api";
+import { LocalPlan } from "./local-plan";
 import type { Todoist } from "./todoist";
 export type App = {
   store: Store;
@@ -44,6 +45,8 @@ export function app(): Promise<App> {
       fake.failBefore = Number(process.env.FAKE_TODOIST_FAIL_BEFORE ?? 0);
       fake.loseResponse = Number(process.env.FAKE_TODOIST_LOSE_RESPONSE ?? 0);
       todoist = fake;
+    } else if (process.env.TODOIST_MODE === "local") {
+      todoist = new LocalPlan(store);
     } else {
       if (process.env.TODOIST_MODE && process.env.TODOIST_MODE !== "live")
         throw new Error("Invalid TODOIST_MODE");
@@ -54,7 +57,7 @@ export function app(): Promise<App> {
           : "");
       if (!token)
         throw new Error(
-          "Configure TODOIST_TOKEN_FILE or TODOIST_TOKEN; offline demo requires explicit TODOIST_MODE=fake",
+          "Configure TODOIST_TOKEN_FILE or TODOIST_TOKEN; standalone storage requires TODOIST_MODE=local, demo requires TODOIST_MODE=fake",
         );
       todoist = new TodoistApi(token);
     }

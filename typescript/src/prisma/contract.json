@@ -8,6 +8,14 @@
       "model": "Library",
       "namespace": "__unbound__"
     },
+    "local_meal": {
+      "model": "LocalMeal",
+      "namespace": "__unbound__"
+    },
+    "local_receipt": {
+      "model": "LocalReceipt",
+      "namespace": "__unbound__"
+    },
     "outbox": {
       "model": "Outbox",
       "namespace": "__unbound__"
@@ -61,6 +69,74 @@
               },
               "namespaceId": "__unbound__",
               "table": "library"
+            }
+          },
+          "LocalMeal": {
+            "fields": {
+              "body": {
+                "nullable": false,
+                "type": {
+                  "codecId": "sqlite/text@1",
+                  "kind": "scalar"
+                }
+              },
+              "id": {
+                "nullable": false,
+                "type": {
+                  "codecId": "sql/char@1",
+                  "kind": "scalar",
+                  "typeParams": {
+                    "length": 36
+                  }
+                }
+              }
+            },
+            "relations": {},
+            "storage": {
+              "fields": {
+                "body": {
+                  "column": "body"
+                },
+                "id": {
+                  "column": "id"
+                }
+              },
+              "namespaceId": "__unbound__",
+              "table": "local_meal"
+            }
+          },
+          "LocalReceipt": {
+            "fields": {
+              "body": {
+                "nullable": false,
+                "type": {
+                  "codecId": "sqlite/text@1",
+                  "kind": "scalar"
+                }
+              },
+              "id": {
+                "nullable": false,
+                "type": {
+                  "codecId": "sql/char@1",
+                  "kind": "scalar",
+                  "typeParams": {
+                    "length": 36
+                  }
+                }
+              }
+            },
+            "relations": {},
+            "storage": {
+              "fields": {
+                "body": {
+                  "column": "body"
+                },
+                "id": {
+                  "column": "id"
+                }
+              },
+              "namespaceId": "__unbound__",
+              "table": "local_receipt"
             }
           },
           "Outbox": {
@@ -313,6 +389,56 @@
               },
               "uniques": []
             },
+            "local_meal": {
+              "columns": {
+                "body": {
+                  "codecId": "sqlite/text@1",
+                  "nativeType": "text",
+                  "nullable": false
+                },
+                "id": {
+                  "codecId": "sql/char@1",
+                  "nativeType": "character",
+                  "nullable": false,
+                  "typeParams": {
+                    "length": 36
+                  }
+                }
+              },
+              "foreignKeys": [],
+              "indexes": [],
+              "primaryKey": {
+                "columns": [
+                  "id"
+                ]
+              },
+              "uniques": []
+            },
+            "local_receipt": {
+              "columns": {
+                "body": {
+                  "codecId": "sqlite/text@1",
+                  "nativeType": "text",
+                  "nullable": false
+                },
+                "id": {
+                  "codecId": "sql/char@1",
+                  "nativeType": "character",
+                  "nullable": false,
+                  "typeParams": {
+                    "length": 36
+                  }
+                }
+              },
+              "foreignKeys": [],
+              "indexes": [],
+              "primaryKey": {
+                "columns": [
+                  "id"
+                ]
+              },
+              "uniques": []
+            },
             "outbox": {
               "columns": {
                 "attempted": {
@@ -458,10 +584,10 @@
         "id": "__unbound__"
       }
     },
-    "storageHash": "d6c5331639e413b91e7583cb56357579a5a970efc2ee7aff52dbcab5ec17805d"
+    "storageHash": "bd40ea0e515e856dc5f7969a58b60ed0f6ee3e723143b4cfb27a2d91727bfff5"
   },
   "execution": {
-    "executionHash": "d0f9c05261c50d2b6e441b777efd3ad370e00370c1751368fdaddb0bb974a237",
+    "executionHash": "141903efc64c3b9eafc5aa982c4200fd98fc7e1f589c57b3c5f9547dd3c7d4ad",
     "mutations": {
       "defaults": [
         {
@@ -471,6 +597,28 @@
           },
           "ref": {
             "entry": "library",
+            "field": "id",
+            "namespace": "__unbound__"
+          }
+        },
+        {
+          "onCreate": {
+            "id": "uuidv4",
+            "kind": "generator"
+          },
+          "ref": {
+            "entry": "local_meal",
+            "field": "id",
+            "namespace": "__unbound__"
+          }
+        },
+        {
+          "onCreate": {
+            "id": "uuidv4",
+            "kind": "generator"
+          },
+          "ref": {
+            "entry": "local_receipt",
             "field": "id",
             "namespace": "__unbound__"
           }
