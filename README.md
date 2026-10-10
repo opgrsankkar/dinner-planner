@@ -2,6 +2,32 @@
 
 A single-user, Docker Compose meal planner backed by the Todoist project named exactly `Meals`. Todoist remains authoritative for planned meals; a durable SQLite outbox applies planner changes to Todoist in the background so drag/drop does not wait on its API.
 
+## Standalone Docker deployment (without Todoist)
+
+Use the standalone Compose file to store planned meals, library and settings in a
+persistent SQLite volume. No Todoist account, token file or `.env` file is needed.
+
+```sh
+export APP_PASSWORD='choose-a-private-password'
+docker compose -f compose.local.yaml up -d --build
+```
+
+Open `http://localhost:8789`. The container uses `TODOIST_MODE=local` and starts with
+an empty library and the default meal slots. Add meals and plan them using the same
+board, drag/drop, move/delete buttons and Settings. Plans survive container restarts
+and rebuilds; `docker compose down -v` deletes the named data volume.
+
+The port binds to loopback. To serve through an HTTPS reverse proxy, set
+`PLANNER_ORIGIN=https://your-hostname` and `COOKIE_SECURE=true`. For a different
+local port, set both `PLANNER_PORT` and `PLANNER_ORIGIN` (for example `8790` and
+`http://localhost:8790`). Use a separate database/volume from a Todoist deployment;
+switching modes does not import or synchronize existing plans. Local mode has no
+Todoist completed-task history.
+
+To run the image directly, mount a writable volume at `/data` and set
+`TODOIST_MODE=local`, `DATABASE_PATH=/data/planner.sqlite`, `APP_PASSWORD`, and
+`PLANNER_ORIGIN` to the URL you will open.
+
 ## Run
 
 The x1c deployment uses `compose.yaml` and Caddy. Requirements:

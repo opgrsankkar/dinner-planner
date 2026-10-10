@@ -17,9 +17,9 @@ import type {
 } from '@prisma/orm-sqlite/contract/types';
 
 export type StorageHash =
-  StorageHashBase<'d6c5331639e413b91e7583cb56357579a5a970efc2ee7aff52dbcab5ec17805d'>;
+  StorageHashBase<'bd40ea0e515e856dc5f7969a58b60ed0f6ee3e723143b4cfb27a2d91727bfff5'>;
 export type ExecutionHash =
-  ExecutionHashBase<'d0f9c05261c50d2b6e441b777efd3ad370e00370c1751368fdaddb0bb974a237'>;
+  ExecutionHashBase<'141903efc64c3b9eafc5aa982c4200fd98fc7e1f589c57b3c5f9547dd3c7d4ad'>;
 export type ProfileHash =
   ProfileHashBase<'260b8608d1aacaf1f690779a6cff39a12947c599597c5ba464ca75b9e775df53'>;
 
@@ -133,6 +133,14 @@ export type FieldOutputTypes = {
       readonly id: CodecTypes['sql/char@1']['output'];
       readonly name: CodecTypes['sqlite/text@1']['output'];
     };
+    readonly LocalMeal: {
+      readonly body: CodecTypes['sqlite/text@1']['output'];
+      readonly id: CodecTypes['sql/char@1']['output'];
+    };
+    readonly LocalReceipt: {
+      readonly body: CodecTypes['sqlite/text@1']['output'];
+      readonly id: CodecTypes['sql/char@1']['output'];
+    };
     readonly Outbox: {
       readonly attempted: CodecTypes['sqlite/text@1']['output'];
       readonly confirmedAt: CodecTypes['sqlite/text@1']['output'];
@@ -164,6 +172,14 @@ export type FieldInputTypes = {
     readonly Library: {
       readonly id: CodecTypes['sql/char@1']['input'];
       readonly name: CodecTypes['sqlite/text@1']['input'];
+    };
+    readonly LocalMeal: {
+      readonly body: CodecTypes['sqlite/text@1']['input'];
+      readonly id: CodecTypes['sql/char@1']['input'];
+    };
+    readonly LocalReceipt: {
+      readonly body: CodecTypes['sqlite/text@1']['input'];
+      readonly id: CodecTypes['sql/char@1']['input'];
     };
     readonly Outbox: {
       readonly attempted: CodecTypes['sqlite/text@1']['input'];
@@ -197,6 +213,14 @@ export type StorageColumnTypes = {
       readonly id: CodecTypes['sql/char@1']['output'];
       readonly name: CodecTypes['sqlite/text@1']['output'];
     };
+    readonly local_meal: {
+      readonly body: CodecTypes['sqlite/text@1']['output'];
+      readonly id: CodecTypes['sql/char@1']['output'];
+    };
+    readonly local_receipt: {
+      readonly body: CodecTypes['sqlite/text@1']['output'];
+      readonly id: CodecTypes['sql/char@1']['output'];
+    };
     readonly outbox: {
       readonly attempted: CodecTypes['sqlite/text@1']['output'];
       readonly confirmedAt: CodecTypes['sqlite/text@1']['output'];
@@ -228,6 +252,14 @@ export type StorageColumnInputTypes = {
     readonly library: {
       readonly id: CodecTypes['sql/char@1']['input'];
       readonly name: CodecTypes['sqlite/text@1']['input'];
+    };
+    readonly local_meal: {
+      readonly body: CodecTypes['sqlite/text@1']['input'];
+      readonly id: CodecTypes['sql/char@1']['input'];
+    };
+    readonly local_receipt: {
+      readonly body: CodecTypes['sqlite/text@1']['input'];
+      readonly id: CodecTypes['sql/char@1']['input'];
     };
     readonly outbox: {
       readonly attempted: CodecTypes['sqlite/text@1']['input'];
@@ -262,6 +294,16 @@ export namespace Models {
     name: CodecTypes['sqlite/text@1']['output'];
     readonly [RelationKeys]?: never;
   };
+  export type LocalMeal = {
+    body: CodecTypes['sqlite/text@1']['output'];
+    id: CodecTypes['sql/char@1']['output'];
+    readonly [RelationKeys]?: never;
+  };
+  export type LocalReceipt = {
+    body: CodecTypes['sqlite/text@1']['output'];
+    id: CodecTypes['sql/char@1']['output'];
+    readonly [RelationKeys]?: never;
+  };
   export type Outbox = {
     attempted: CodecTypes['sqlite/text@1']['output'];
     confirmedAt: CodecTypes['sqlite/text@1']['output'];
@@ -294,6 +336,8 @@ export namespace Models {
 
 export declare const models: {
   Library: Models.Library;
+  LocalMeal: Models.LocalMeal;
+  LocalReceipt: Models.LocalReceipt;
   Outbox: Models.Outbox;
   Session: Models.Session;
   Setting: Models.Setting;
@@ -330,6 +374,44 @@ type ContractBase = Omit<
                   readonly nativeType: 'text';
                   readonly codecId: 'sqlite/text@1';
                   readonly nullable: false;
+                };
+              };
+              primaryKey: { readonly columns: readonly ['id'] };
+              uniques: readonly [];
+              indexes: readonly [];
+              foreignKeys: readonly [];
+            };
+            readonly local_meal: {
+              columns: {
+                readonly body: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'sqlite/text@1';
+                  readonly nullable: false;
+                };
+                readonly id: {
+                  readonly nativeType: 'character';
+                  readonly codecId: 'sql/char@1';
+                  readonly nullable: false;
+                  readonly typeParams: { readonly length: 36 };
+                };
+              };
+              primaryKey: { readonly columns: readonly ['id'] };
+              uniques: readonly [];
+              indexes: readonly [];
+              foreignKeys: readonly [];
+            };
+            readonly local_receipt: {
+              columns: {
+                readonly body: {
+                  readonly nativeType: 'text';
+                  readonly codecId: 'sqlite/text@1';
+                  readonly nullable: false;
+                };
+                readonly id: {
+                  readonly nativeType: 'character';
+                  readonly codecId: 'sql/char@1';
+                  readonly nullable: false;
+                  readonly typeParams: { readonly length: 36 };
                 };
               };
               primaryKey: { readonly columns: readonly ['id'] };
@@ -468,6 +550,14 @@ type ContractBase = Omit<
       readonly namespace: '__unbound__' & NamespaceId;
       readonly model: 'Library';
     };
+    readonly local_meal: {
+      readonly namespace: '__unbound__' & NamespaceId;
+      readonly model: 'LocalMeal';
+    };
+    readonly local_receipt: {
+      readonly namespace: '__unbound__' & NamespaceId;
+      readonly model: 'LocalReceipt';
+    };
     readonly outbox: { readonly namespace: '__unbound__' & NamespaceId; readonly model: 'Outbox' };
     readonly session: {
       readonly namespace: '__unbound__' & NamespaceId;
@@ -505,6 +595,56 @@ type ContractBase = Omit<
               readonly fields: {
                 readonly id: { readonly column: 'id' };
                 readonly name: { readonly column: 'name' };
+              };
+            };
+          };
+          readonly LocalMeal: {
+            readonly fields: {
+              readonly body: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'sqlite/text@1' };
+              };
+              readonly id: {
+                readonly nullable: false;
+                readonly type: {
+                  readonly kind: 'scalar';
+                  readonly codecId: 'sql/char@1';
+                  readonly typeParams: { readonly length: 36 };
+                };
+              };
+            };
+            readonly relations: Record<string, never>;
+            readonly storage: {
+              readonly table: 'local_meal';
+              readonly namespaceId: '__unbound__';
+              readonly fields: {
+                readonly body: { readonly column: 'body' };
+                readonly id: { readonly column: 'id' };
+              };
+            };
+          };
+          readonly LocalReceipt: {
+            readonly fields: {
+              readonly body: {
+                readonly nullable: false;
+                readonly type: { readonly kind: 'scalar'; readonly codecId: 'sqlite/text@1' };
+              };
+              readonly id: {
+                readonly nullable: false;
+                readonly type: {
+                  readonly kind: 'scalar';
+                  readonly codecId: 'sql/char@1';
+                  readonly typeParams: { readonly length: 36 };
+                };
+              };
+            };
+            readonly relations: Record<string, never>;
+            readonly storage: {
+              readonly table: 'local_receipt';
+              readonly namespaceId: '__unbound__';
+              readonly fields: {
+                readonly body: { readonly column: 'body' };
+                readonly id: { readonly column: 'id' };
               };
             };
           };
@@ -672,6 +812,22 @@ type ContractBase = Omit<
           readonly onCreate: { readonly id: 'uuidv4'; readonly kind: 'generator' };
           readonly ref: {
             readonly entry: 'library';
+            readonly field: 'id';
+            readonly namespace: '__unbound__';
+          };
+        },
+        {
+          readonly onCreate: { readonly id: 'uuidv4'; readonly kind: 'generator' };
+          readonly ref: {
+            readonly entry: 'local_meal';
+            readonly field: 'id';
+            readonly namespace: '__unbound__';
+          };
+        },
+        {
+          readonly onCreate: { readonly id: 'uuidv4'; readonly kind: 'generator' };
+          readonly ref: {
+            readonly entry: 'local_receipt';
             readonly field: 'id';
             readonly namespace: '__unbound__';
           };

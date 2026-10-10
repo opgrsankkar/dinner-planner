@@ -4,6 +4,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import "./MealSlotSettings.css";
 import { sortSlotsByTime, sortSlotsKeepingDraftsOnTop, validSlotTime } from "../slot-order";
 import type { Slot } from "../types";
+import { requestId } from "../request-id";
 
 export interface MealSlotSettingsProps {
   active?: boolean;
@@ -159,7 +160,7 @@ export function MealSlotSettings({ active = false, initialSlots, initialRevision
               className="secondary-button"
               disabled={saving || slots.length >= 12}
               onClick={() => {
-                const draft = { id: crypto.randomUUID(), name: "", time: "" };
+                const draft = { id: requestId(), name: "", time: "" };
                 setSlots(current => [draft, ...current]);
                 setState("idle");
               }}

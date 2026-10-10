@@ -2,6 +2,14 @@
 
 TanStack Start/React, strict TypeScript, Node 26 and experimental Prisma ORM 8 SQLite. Todoist is the authority for planned meals. Local SQLite contains settings, reusable library, slots, sessions and a durable mutation outbox. Run one application/worker per database.
 
+For standalone deployments, `TODOIST_MODE=local` makes SQLite authoritative for
+planned meals too. The same board and outbox worker operate on durable Prisma
+`LocalMeal`/`LocalReceipt` tables in the application database. Writes and replay
+receipts commit together; no Todoist requests or token-file reads occur. Use a
+separate database from live/fake modes; no automatic plan import is performed.
+The root `compose.local.yaml` provides this mode with a named persistent volume,
+loopback HTTP port and no token mount or env file. See the root README for startup.
+
 ## Build and verify
 
 ```sh
@@ -14,6 +22,7 @@ npm test
 npm run typecheck
 npm run build
 npm run smoke
+npm run smoke:local
 ```
 
 The smoke starts **the actual production artifact** (`dist/server/server.js` plus `dist/client`) with `scripts/serve.mjs`, on loopback 3100. It uses fresh synthetic databases, a generated password and explicit fake mode. It exercises HTTP authentication, static assets, desktop/mobile interaction, native drag placement/move/delete, button alternatives, pending/retry/reload, settings Save/Revert/reorder, themes, completed cards, integration warnings, week navigation and logout. Browser default is `/usr/bin/google-chrome`; override `CHROME_PATH` if needed. Tests inject fetch for the real adapter; no test accesses real Todoist or deployment files.
@@ -28,6 +37,7 @@ Environment compatibility:
 
 - `APP_PASSWORD` (legacy alias `PLANNER_PASSWORD`) is required. Sessions are random, server-side SQLite records; `SESSION_SECRET` remains accepted by Compose but is unnecessary for these opaque session IDs. Old signed cookies require a fresh login at cutover.
 - `TODOIST_TOKEN` takes precedence over `TODOIST_TOKEN_FILE`. Default mode is live and missing/invalid configuration never falls back to a fake. `TODOIST_MODE=fake` is explicit offline demo/testing only; use a separate database.
+- `TODOIST_MODE=local` requires no Todoist credentials and ignores any configured token/token file. New local databases have an empty library and the four default slots. Planned meals persist in SQLite; completed history from Todoist is unavailable.
 - `DATABASE_PATH` (alias `PLANNER_DB`) defaults to `.local/planner.sqlite` outside Compose, `/data/meals.sqlite3` in Compose. At cutover set it to the **new imported file**, never the old Python file.
 - `TZ=Asia/Kolkata`; planner dates/times are explicitly interpreted in Asia/Kolkata regardless of browser/host timezone.
 - `ALLOWED_HOSTS` is a comma-separated hostname list. Without it, API uses `PLANNER_ORIGIN` (default `http://localhost:8789`). `COOKIE_SECURE=true` is used for Caddy HTTPS and sets the request protocol used by Origin checks; local HTTP tests leave it unset. No forwarded Host is trusted.

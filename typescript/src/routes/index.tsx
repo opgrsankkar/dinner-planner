@@ -4,6 +4,7 @@ import { SettingsPage } from "../settings";
 import { WeekPicker } from "../WeekPicker";
 import type { Board, Meal, Card, Slot } from "../types";
 import { defaultPlanPlacement } from "../plan-default";
+import { requestId as newRequestId } from "../request-id";
 export const Route = createFileRoute("/")({ component: Planner });
 type Intent = {
   requestId: string;
@@ -387,7 +388,7 @@ export function Planner() {
     return result;
   }
   async function place(meal: Meal, date: string, slot: Slot) {
-    const requestId = crypto.randomUUID();
+    const requestId = newRequestId();
     const card: Card = {
       id: `local:${requestId}`,
       requestId,
@@ -462,7 +463,7 @@ export function Planner() {
     slot?: Slot,
   ) {
     if (card.completed) return;
-    const requestId = crypto.randomUUID();
+    const requestId = newRequestId();
     const pending: Card = {
       ...card,
       requestId,
@@ -1071,7 +1072,7 @@ export function Planner() {
         onClose={() => dialogTrigger.current?.focus()}
       >
         <h2>Delete {deleteTarget?.name}?</h2>
-        <p>This removes the planned meal from Todoist.</p>
+        <p>This removes the meal from your plan.</p>
         <button
           className="secondary-button"
           onClick={() => {
