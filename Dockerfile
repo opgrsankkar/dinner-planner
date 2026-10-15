@@ -20,6 +20,7 @@ COPY --from=production-dependencies /srv/app/typescript/node_modules ./node_modu
 COPY --from=build /srv/app/typescript/dist ./dist
 COPY --from=build /srv/app/typescript/package.json ./
 COPY --from=build /srv/app/typescript/scripts/serve.mjs ./scripts/serve.mjs
+COPY --from=build /srv/app/typescript/src/server/persistence.ts ./src/server/persistence.ts
 USER 10001:10001
 EXPOSE 8789
 CMD ["node", "scripts/serve.mjs"]
