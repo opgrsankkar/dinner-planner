@@ -13,7 +13,7 @@ before(async () => {
   root = await mkdtemp(join(tmpdir(), "planner-slice-"));
   execFileSync(
     process.execPath,
-    ["node_modules/prisma/dist/prisma.js", "db", "init"],
+    ["--import", "tsx", "scripts/init-db.ts"],
     {
       env: {
         ...process.env,
@@ -155,7 +155,7 @@ test("retry reuses request ID when uncertain create marker is temporarily invisi
     await f.worker.tick();
     assert.deepEqual(requests, [f.input.requestId, f.input.requestId]);
     assert.equal((await list(f.project.id)).length, 1);
-    assert.equal((await f.store.db.orm.Outbox.all())[0].state, "saved");
+    assert.equal((await f.store.db.outboxAll())[0].state, "saved");
   } finally {
     await f.close();
   }
@@ -167,7 +167,7 @@ test("concurrent repeated placement is idempotent and altered reuse is rejected"
     await Promise.all(
       Array.from({ length: 5 }, () => f.store.place(f.input, f.project.id)),
     );
-    assert.equal((await f.store.db.orm.Outbox.all()).length, 1);
+    assert.equal((await f.store.db.outboxAll()).length, 1);
     await assert.rejects(
       f.store.place({ ...f.input, date: "2026-10-02" }, f.project.id),
       /another placement/,
@@ -185,16 +185,16 @@ test("invalid library/slot causes no intent; rollback actually works", async () 
       f.store.place({ ...f.input, mealId: randomUUID() }, f.project.id),
       /no longer exists/,
     );
-    assert.equal((await f.store.db.orm.Outbox.all()).length, 0);
-    await assert.rejects(
-      f.store.db.transaction(async (tx) => {
-        await tx.orm.Library.create({ name: "Rolled back" });
+    assert.equal((await f.store.db.outboxAll()).length, 0);
+    assert.throws(
+      () => f.store.db.transaction((tx) => {
+        tx.libraryInsert({ name: "Rolled back" });
         throw new Error("rollback");
       }),
       /rollback/,
     );
     assert.ok(
-      !(await f.store.db.orm.Library.all()).some(
+      !(await f.store.db.libraryAll()).some(
         (meal) => meal.name === "Rolled back",
       ),
     );
@@ -212,7 +212,7 @@ test("changed Meals project ownership prevents create; bad acknowledgement remai
     });
     await f.worker.tick();
     assert.equal(f.provider.createCalls, 0);
-    assert.match((await f.store.db.orm.Outbox.all())[0].error, /ownership/);
+    assert.match((await f.store.db.outboxAll())[0].error, /ownership/);
   } finally {
     await f.close();
   }
@@ -225,8 +225,8 @@ test("changed Meals project ownership prevents create; bad acknowledgement remai
       projectId: "other-project",
     });
     await g.worker.tick();
-    assert.equal((await g.store.db.orm.Outbox.all())[0].state, "pending");
-    assert.match((await g.store.db.orm.Outbox.all())[0].error, /did not match/);
+    assert.equal((await g.store.db.outboxAll())[0].state, "pending");
+    assert.match((await g.store.db.outboxAll())[0].error, /did not match/);
   } finally {
     await g.close();
   }
@@ -238,8 +238,8 @@ test("saved write overlay is bounded, then provider is authoritative", async () 
     await f.worker.tick();
     f.provider.list = async () => [];
     assert.equal((await f.store.board(f.provider)).cards.length, 1);
-    const row = (await f.store.db.orm.Outbox.all())[0];
-    await f.store.db.orm.Outbox.where({ id: row.id }).update({
+    const row = (await f.store.db.outboxAll())[0];
+    await f.store.db.outboxUpdate(row.id, {
       confirmedAt: String(Date.now() - 120001),
     });
     assert.equal((await f.store.board(f.provider)).cards.length, 0);
@@ -345,7 +345,7 @@ test("login/session/logout, hostile hosts/origins, CSRF, expiry and wrong passwo
       401,
     );
     const session = await f.store.login();
-    await f.store.db.orm.Session.where({ id: session.id }).update({
+    await f.store.db.sessionUpdate(session.id, {
       expiresAt: "0",
     });
     assert.equal(await f.store.session(session.id), null);
@@ -396,9 +396,7 @@ test("move and delete survive restart, retry stable IDs, and delete never reads 
         throw new Error("DELETE acknowledgement must not trigger GET");
       };
       await worker.tick();
-      const op = await store.db.orm.Outbox.where({
-        id: deletion.requestId as `${string}-${string}-${string}-${string}-${string}`,
-      }).first();
+      const op = await store.db.outboxGet(deletion.requestId);
       assert.equal(op?.state, "saved");
       // Repeated delete, including an absent task, is acknowledged idempotently.
       await provider.delete(task.id, f.project.id, deletion.requestId);
@@ -522,7 +520,7 @@ test("additive initialization upgrades a synthetic first-slice database without 
   db.close();
   execFileSync(
     process.execPath,
-    ["node_modules/prisma/dist/prisma.js", "db", "init"],
+    ["--import", "tsx", "scripts/init-db.ts"],
     {
       env: { ...process.env, DATABASE_PATH: f.path, PLANNER_DB: f.path },
       stdio: "pipe",
@@ -680,7 +678,7 @@ test("real adapter uncertain create survives worker restart and invisible marker
     await f.store.retry(f.input.requestId, api);
     await restarted.tick();
     await restarted.stop();
-    const row = (await f.store.db.orm.Outbox.all())[0];
+    const row = (await f.store.db.outboxAll())[0];
     assert.equal(row.state, "saved");
     assert.equal(row.remoteId, "6XGgmFVcrG5RRjVr");
     assert.equal(creates, 1);
@@ -731,8 +729,8 @@ test("slot save migrates prior aliases, excludes completed meals and refuses occ
     await f.store.place(f.input, f.project.id);
     await f.worker.tick();
     const board = await f.store.board(f.provider);
-    const setting = (await f.store.db.orm.Setting.all())[0];
-    await f.store.db.orm.Setting.where({ id: setting.id }).update({
+    const setting = (await f.store.db.settingAll())[0];
+    await f.store.db.settingUpdate(setting.id, {
       value: JSON.stringify({
         ...board.settings,
         aliases: { "07:45": f.input.slotId },
@@ -760,7 +758,7 @@ test("slot save migrates prior aliases, excludes completed meals and refuses occ
       /Move or complete/,
     );
     await f.store.saveSlots(board.slots, board.settings.revision, f.provider);
-    const pending = (await f.store.db.orm.Outbox.all()).filter(
+    const pending = (await f.store.db.outboxAll()).filter(
       (row) => row.state === "pending",
     );
     assert.equal(pending.length, 1);

@@ -9,9 +9,9 @@ The current planner uses FastAPI with a React frontend. This pilot records the m
 
 ## Decision
 
-- Migrate toward a fullstack TypeScript application using TanStack Start, Node.js 26, and Prisma ORM 8.
+- Migrate toward a fullstack TypeScript application using TanStack Start, Node.js 26, and direct SQLite via `node:sqlite`.
 - Use SQLite only for app-owned operational state, such as settings and a durable outbox. Todoist remains authoritative for planned meal tasks.
 
 ## Migration gate
 
-Prisma ORM 8's current documentation labels its SQLite package experimental. Before starting runtime migration, prove that Prisma ORM 8 SQLite is compatible with the planner and that existing app-owned operational data can be migrated safely. See [Prisma ORM 8 supported databases](https://www.prisma.io/docs/orm/supported-databases).
+The user approved replacing the experimental ORM with Node 26's built-in `node:sqlite`. Preserve existing SQLite text UUID tables in place and retain provider metadata for rollback. Schema initialization and versioning belong to the typed persistence boundary.

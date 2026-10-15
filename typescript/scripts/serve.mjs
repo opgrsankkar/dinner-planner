@@ -3,23 +3,13 @@ import { Readable } from "node:stream";
 import { readFile, stat, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve, dirname, extname, sep } from "node:path";
-import { execFileSync } from "node:child_process";
+import { Persistence } from "../src/server/persistence.ts";
 
 const db = resolve(
   process.env.DATABASE_PATH ??
     process.env.PLANNER_DB ??
     ".local/planner.sqlite",
 );
-await mkdir(dirname(db), { recursive: true });
-if (!existsSync(db))
-  execFileSync(
-    process.execPath,
-    ["node_modules/prisma/dist/prisma.js", "db", "init"],
-    {
-      env: { ...process.env, DATABASE_PATH: db, PLANNER_DB: db },
-      stdio: "inherit",
-    },
-  );
 if (!(process.env.APP_PASSWORD ?? process.env.PLANNER_PASSWORD))
   throw new Error("APP_PASSWORD is required");
 if (process.env.TODOIST_MODE && !["live", "fake", "local"].includes(process.env.TODOIST_MODE))
@@ -33,6 +23,10 @@ if (
   throw new Error(
     "Todoist credentials are required; standalone storage requires TODOIST_MODE=local, demo requires TODOIST_MODE=fake",
   );
+// Node 26 strips this shared TypeScript module natively; no CLI/runtime dependency.
+// Validate storage before listening, including before reporting /healthz ready.
+await mkdir(dirname(db), { recursive: true });
+new Persistence(db).close();
 const { default: handler } = await import("../dist/server/server.js");
 const root = resolve("dist/client");
 const mime = {

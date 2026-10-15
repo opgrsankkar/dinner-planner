@@ -68,7 +68,7 @@ To use a direct token, set `TODOIST_TOKEN=...` in `.env`; it takes precedence ov
 
 ## TypeScript application
 
-The root container now builds and hosts TanStack Start/React with Node 26 and Prisma ORM 8 SQLite. See [implementation, verification and cutover instructions](typescript/README.md). The Python source remains only as a behavior/data reference and rollback artifact; never point the new runtime at the old Python database. Import an explicit backup into a distinct target and set `DATABASE_PATH` to it.
+The root container now builds and hosts TanStack Start/React with Node 26 and direct SQLite via `node:sqlite`. See [implementation, verification and cutover instructions](typescript/README.md). The Python source remains only as a behavior/data reference and rollback artifact; never point the new runtime at the old Python database. Import an explicit backup into a distinct target and set `DATABASE_PATH` to it.
 
 ## Local checks
 

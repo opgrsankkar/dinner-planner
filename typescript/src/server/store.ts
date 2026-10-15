@@ -1,8 +1,5 @@
 import { sortSlotsByTime } from "../slot-order";
-import sqlite from "@prisma/orm-sqlite/runtime";
-import type { DefaultModelRow } from "@prisma/orm-sqlite/orm-client";
-import type { Contract } from "../prisma/contract";
-import contractJson from "../prisma/contract.json";
+import { Persistence } from "./persistence";
 import { randomUUID } from "node:crypto";
 import type {
   Board,
@@ -14,41 +11,39 @@ import type {
 } from "../types";
 import type { Todoist } from "./todoist";
 import { TodoistError } from "./todoist-api";
-type Id = DefaultModelRow<Contract, "Outbox">["id"];
-const id = (value: string) => value as Id;
 export const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const settingsId = id("00000000-0000-4000-8000-000000000001");
+const settingsId = "00000000-0000-4000-8000-000000000001";
 export class Store {
   readonly db;
   private writing: Promise<unknown> = Promise.resolve();
   constructor(path: string) {
-    this.db = sqlite<Contract>({ contractJson, path });
+    this.db = new Persistence(path);
   }
   // One writer within the application, including requests and worker acknowledgements.
-  write<T>(fn: () => Promise<T>): Promise<T> {
+  write<T>(fn: () => T | Promise<T>): Promise<T> {
     const result = this.writing.then(fn);
     this.writing = result.catch(() => {});
     return result;
   }
   async seed(demo = true) {
     await this.write(() =>
-      this.db.transaction(async (tx) => {
-        if (await tx.orm.Setting.where({ id: settingsId }).first()) return;
-        if (!(await tx.orm.Slot.first())) {
+      this.db.transaction((tx) => {
+        if (tx.settingGet(settingsId)) return;
+        if (!(tx.slotAll()[0])) {
           for (const [name, time] of [
             ["Breakfast", "08:00"],
             ["Lunch", "13:00"],
             ["Dinner", "19:00"],
             ...(!demo ? [["School snack", "16:00"]] : []),
           ]) {
-            await tx.orm.Slot.create({ id: id(randomUUID()), name, time });
+            tx.slotInsert({ id: randomUUID(), name, time });
           }
         }
-        if (demo && !(await tx.orm.Library.first()))
+        if (demo && !(tx.libraryAll()[0]))
           for (const name of ["Idli & sambar", "Dal & rice", "Vegetable pasta"])
-            await tx.orm.Library.create({ id: id(randomUUID()), name });
-        await tx.orm.Setting.create({
+            tx.libraryInsert({ id: randomUUID(), name });
+        tx.settingInsert({
           id: settingsId,
           value: JSON.stringify({
             theme: "system",
@@ -66,12 +61,12 @@ export class Store {
     if (!name || name.length > 120)
       throw new Error("Use a meal name between 1 and 120 characters");
     return this.write(() =>
-      this.db.transaction(async (tx) => {
-        const existing = (await tx.orm.Library.all()).find(
+      this.db.transaction((tx) => {
+        const existing = (tx.libraryAll()).find(
           (meal) => meal.name.toLowerCase() === name.toLowerCase(),
         );
         return (
-          existing ?? tx.orm.Library.create({ id: id(randomUUID()), name })
+          existing ?? tx.libraryInsert({ id: randomUUID(), name })
         );
       }),
     );
@@ -93,10 +88,8 @@ export class Store {
     )
       throw new Error("Invalid day");
     return this.write(() =>
-      this.db.transaction(async (tx) => {
-        const existing = await tx.orm.Outbox.where({
-          id: id(input.requestId),
-        }).first();
+      this.db.transaction((tx) => {
+        const existing = tx.outboxGet(input.requestId);
         if (existing) {
           const previous: Placement = JSON.parse(existing.payload);
           if (
@@ -108,10 +101,8 @@ export class Store {
             throw new Error("Request ID already belongs to another placement");
           return existing;
         }
-        const meal = await tx.orm.Library.where({
-          id: id(input.mealId),
-        }).first();
-        const slot = await tx.orm.Slot.where({ id: id(input.slotId) }).first();
+        const meal = tx.libraryGet(input.mealId);
+        const slot = tx.slotGet(input.slotId);
         if (!meal || !slot) throw new Error("Meal or slot no longer exists");
         const payload: Placement = {
           mealId: meal.id,
@@ -121,8 +112,8 @@ export class Store {
           date: input.date,
           projectId,
         };
-        return tx.orm.Outbox.create({
-          id: id(input.requestId),
+        return tx.outboxInsert({
+          id: input.requestId,
           payload: JSON.stringify(payload),
           state: "pending",
           error: "",
@@ -155,7 +146,7 @@ export class Store {
         error instanceof Error ? error.message : "Todoist unavailable";
     }
     if (!project.id) {
-      const pending = (await this.db.orm.Outbox.all()).find(
+      const pending = (this.db.outboxAll()).find(
         (row) => row.state === "pending",
       );
       if (pending)
@@ -163,7 +154,7 @@ export class Store {
     }
     return this.write(async () => {
       const settings = await this.settings();
-      const operations = (await this.db.orm.Outbox.all()).filter(
+      const operations = (this.db.outboxAll()).filter(
         (row) => (JSON.parse(row.payload) as Mutation).projectId === project.id,
       );
       const cards: Card[] = remote
@@ -251,7 +242,7 @@ export class Store {
           confirmedAt: Number(op.confirmedAt),
         });
       }
-      const slots = await this.db.orm.Slot.all();
+      const slots = this.db.slotAll();
       for (const card of cards)
         card.slotId =
           slots.find((slot) => slot.time === card.time)?.id ??
@@ -272,14 +263,14 @@ export class Store {
               (JSON.parse(row.payload) as Mutation).projectId === project.id,
           )
           .map((row) => row.id),
-        library: sort(await this.db.orm.Library.all(), settings.libraryOrder),
+        library: sort(this.db.libraryAll(), settings.libraryOrder),
         slots: sortSlotsByTime(sort(slots, settings.slotOrder)),
         cards,
       };
     });
   }
   async settings(): Promise<Settings> {
-    const row = await this.db.orm.Setting.where({ id: settingsId }).first();
+    const row = this.db.settingGet(settingsId);
     return row
       ? JSON.parse(row.value)
       : {
@@ -300,13 +291,13 @@ export class Store {
     });
   }
   private async putSettings(settings: Settings) {
-    const row = await this.db.orm.Setting.where({ id: settingsId }).first();
+    const row = this.db.settingGet(settingsId);
     if (row)
-      await this.db.orm.Setting.where({ id: settingsId }).update({
+      this.db.settingUpdate(settingsId, {
         value: JSON.stringify(settings),
       });
     else
-      await this.db.orm.Setting.create({
+      this.db.settingInsert({
         id: settingsId,
         value: JSON.stringify(settings),
       });
@@ -316,22 +307,22 @@ export class Store {
     name = name.trim();
     if (!name || name.length > 120) throw new Error("Meal name must be 1–120 characters");
     return this.write(async () => {
-      const meals = await this.db.orm.Library.all();
+      const meals = this.db.libraryAll();
       if (!meals.some(meal => meal.id === mealId)) throw new Error("Meal not found");
       if (meals.some(meal => meal.id !== mealId && meal.name.toLowerCase() === name.toLowerCase()))
         throw new Error("A meal with this name already exists");
-      await this.db.orm.Library.where({ id: id(mealId) }).update({ name });
+      this.db.libraryUpdate(mealId, { name });
     });
   }
   async removeLibrary(mealId: string) {
     if (!uuidPattern.test(mealId)) throw new Error("Invalid meal ID");
     await this.write(() =>
-      this.db.orm.Library.where({ id: id(mealId) }).delete(),
+      this.db.libraryDelete(mealId),
     );
   }
   async shuffle() {
     return this.write(async () => {
-      const order = (await this.db.orm.Library.all()).map((meal) => meal.id);
+      const order = (this.db.libraryAll()).map((meal) => meal.id);
       for (let i = order.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [order[i], order[j]] = [order[j], order[i]];
@@ -361,9 +352,7 @@ export class Store {
     const project = await todoist.mealsProject();
     if (project.name !== "Meals") throw new Error("Meals project unavailable");
     return this.write(async () => {
-      const existing = await this.db.orm.Outbox.where({
-        id: id(input.requestId),
-      }).first();
+      const existing = this.db.outboxGet(input.requestId);
       if (existing) {
         const previous: Mutation = JSON.parse(existing.payload);
         if (
@@ -376,7 +365,7 @@ export class Store {
           throw new Error("Request ID already belongs to another operation");
         return existing;
       }
-      const operations = await this.db.orm.Outbox.all();
+      const operations = this.db.outboxAll();
       if (
         operations.some(
           (row) =>
@@ -392,9 +381,7 @@ export class Store {
         throw new Error(
           "Meal is missing, completed, or does not belong to Meals",
         );
-      const slot = await this.db.orm.Slot.where({
-        id: id(input.slotId ?? ""),
-      }).first();
+      const slot = this.db.slotGet(input.slotId ?? "");
       if (input.kind === "move" && (!slot || !validDate(input.date ?? "")))
         throw new Error("Invalid destination");
       const payload: Mutation = {
@@ -411,8 +398,8 @@ export class Store {
     });
   }
   private async enqueue(payload: Mutation, requestId: string = randomUUID()) {
-    return this.db.orm.Outbox.create({
-      id: id(requestId),
+    return this.db.outboxInsert({
+      id: requestId,
       payload: JSON.stringify(payload),
       state: "pending",
       error: "",
@@ -426,7 +413,7 @@ export class Store {
     if (!uuidPattern.test(requestId)) throw new Error("Invalid request ID");
     const project = await todoist.mealsProject();
     await this.write(async () => {
-      const row = await this.db.orm.Outbox.where({ id: id(requestId) }).first();
+      const row = this.db.outboxGet(requestId);
       if (
         !row ||
         project.name !== "Meals" ||
@@ -434,7 +421,7 @@ export class Store {
       )
         throw new Error("Operation does not belong to Meals");
       if (row.state === "pending")
-        await this.db.orm.Outbox.where({ id: row.id }).update({
+        this.db.outboxUpdate(row.id, {
           nextAt: "0",
           error: "",
         });
@@ -462,8 +449,8 @@ export class Store {
       const settings = await this.settings();
       if (settings.revision !== revision)
         throw new Error("Settings changed elsewhere. Reload before saving");
-      const old = await this.db.orm.Slot.all();
-      const operations = await this.db.orm.Outbox.all();
+      const old = this.db.slotAll();
+      const operations = this.db.outboxAll();
       if (operations.some((row) => row.state === "pending"))
         throw new Error("Wait for pending meals before changing slots");
       const remote = await todoist.list(project.id, { fresh: true });
@@ -486,7 +473,7 @@ export class Store {
           slots.some((slot) => slot.id === id),
         ),
       );
-      await this.db.transaction(async (tx) => {
+      this.db.transaction((tx) => {
         for (const slot of slots) {
           const previous = old.find((item) => item.id === slot.id);
           if (previous) {
@@ -500,8 +487,8 @@ export class Store {
                 (old.find((item) => item.time === task.time)?.id ??
                   settings.aliases[task.time]) === slot.id,
             )) {
-              await tx.orm.Outbox.create({
-                id: id(randomUUID()),
+              tx.outboxInsert({
+                id: randomUUID(),
                 payload: JSON.stringify({
                   kind: "move",
                   taskId: task.id,
@@ -523,11 +510,11 @@ export class Store {
           }
         }
         for (const previous of old)
-          await tx.orm.Slot.where({ id: previous.id }).delete();
+          tx.slotDelete(previous.id);
         for (const slot of slots)
-          await tx.orm.Slot.create({
+          tx.slotInsert({
             ...slot,
-            id: id(slot.id),
+            id: slot.id,
             name: slot.name.trim(),
           });
         const next = {
@@ -536,13 +523,13 @@ export class Store {
           slotOrder: slots.map((slot) => slot.id),
           revision: revision + 1,
         };
-        const row = await tx.orm.Setting.where({ id: settingsId }).first();
+        const row = tx.settingGet(settingsId);
         if (row)
-          await tx.orm.Setting.where({ id: settingsId }).update({
+          tx.settingUpdate(settingsId, {
             value: JSON.stringify(next),
           });
         else
-          await tx.orm.Setting.create({
+          tx.settingInsert({
             id: settingsId,
             value: JSON.stringify(next),
           });
@@ -552,13 +539,13 @@ export class Store {
   }
   async session(token: string) {
     if (!uuidPattern.test(token)) return null;
-    const session = await this.db.orm.Session.where({ id: id(token) }).first();
+    const session = this.db.sessionGet(token);
     return session && Number(session.expiresAt) > Date.now() ? session : null;
   }
   async login() {
     return this.write(() =>
-      this.db.orm.Session.create({
-        id: id(randomUUID()),
+      this.db.sessionInsert({
+        id: randomUUID(),
         csrf: randomUUID(),
         expiresAt: String(Date.now() + 7 * 86400000),
       }),
@@ -566,12 +553,12 @@ export class Store {
   }
   async logout(token: string) {
     await this.write(() =>
-      this.db.orm.Session.where({ id: id(token) }).delete(),
+      this.db.sessionDelete(token),
     );
   }
   async close() {
     await this.writing;
-    await this.db.close();
+    this.db.close();
   }
 }
 function validDate(date: string) {
@@ -605,7 +592,7 @@ export class Worker {
   }
   private async process() {
     const action = await this.store.write(async () =>
-      (await this.store.db.orm.Outbox.all()).find(
+      (this.store.db.outboxAll()).find(
         (row) => row.state === "pending" && Number(row.nextAt) <= Date.now(),
       ),
     );
@@ -619,7 +606,7 @@ export class Worker {
         );
       if (payload.kind) {
         await this.store.write(() =>
-          this.store.db.orm.Outbox.where({ id: action.id }).update({
+          this.store.db.outboxUpdate(action.id, {
             attempted: String(Number(action.attempted) + 1),
           }),
         );
@@ -643,7 +630,7 @@ export class Worker {
             );
         }
         await this.store.write(() =>
-          this.store.db.orm.Outbox.where({ id: action.id }).update({
+          this.store.db.outboxUpdate(action.id, {
             state: "saved",
             remoteId: payload.taskId!,
             error: "",
@@ -687,7 +674,7 @@ export class Worker {
           true,
         );
       await this.store.write(() =>
-        this.store.db.orm.Outbox.where({ id: action.id }).update({
+        this.store.db.outboxUpdate(action.id, {
           attempted: String(Number(action.attempted) + 1),
         }),
       );
@@ -695,7 +682,7 @@ export class Worker {
       const task =
         matches[0] ?? (await this.todoist.create(payload, action.id));
       await this.store.write(() =>
-        this.store.db.orm.Outbox.where({ id: action.id }).update({
+        this.store.db.outboxUpdate(action.id, {
           remoteId: task.id,
         }),
       );
@@ -711,7 +698,7 @@ export class Worker {
           true,
         );
       await this.store.write(() =>
-        this.store.db.orm.Outbox.where({ id: action.id }).update({
+        this.store.db.outboxUpdate(action.id, {
           state: "saved",
           remoteId: task.id,
           error: "",
@@ -724,7 +711,7 @@ export class Worker {
         Math.min(30000, 500 * 2 ** Math.min(Number(action.attempted), 6)),
       );
       await this.store.write(() =>
-        this.store.db.orm.Outbox.where({ id: action.id }).update({
+        this.store.db.outboxUpdate(action.id, {
           ...(!payload.kind && error instanceof TodoistError && !error.uncertain
             ? { attempted: action.attempted }
             : {}),

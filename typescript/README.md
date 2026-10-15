@@ -1,9 +1,9 @@
 # Full-stack TypeScript Dinner Planner
 
-TanStack Start/React, strict TypeScript, Node 26 and experimental Prisma ORM 8 SQLite. Todoist is the authority for planned meals. Local SQLite contains settings, reusable library, slots, sessions and a durable mutation outbox. Run one application/worker per database.
+TanStack Start/React, strict TypeScript, Node 26 and direct SQLite via `node:sqlite`. Todoist is the authority for planned meals. Local SQLite contains settings, reusable library, slots, sessions and a durable mutation outbox. Run one application/worker per database.
 
 For standalone deployments, `TODOIST_MODE=local` makes SQLite authoritative for
-planned meals too. The same board and outbox worker operate on durable Prisma
+planned meals too. The same board and outbox worker operate on durable SQLite
 `LocalMeal`/`LocalReceipt` tables in the application database. Writes and replay
 receipts commit together; no Todoist requests or token-file reads occur. Use a
 separate database from live/fake modes; no automatic plan import is performed.
@@ -17,7 +17,6 @@ export PATH=/home/hermes-admin/.hermes/cache/scratch/dinner-node/node_modules/.b
 export TMPDIR=/home/hermes-admin/.hermes/cache/scratch
 cd typescript
 npm ci
-npm run contract
 npm test
 npm run typecheck
 npm run build
@@ -29,9 +28,9 @@ The smoke starts **the actual production artifact** (`dist/server/server.js` plu
 
 ## Production
 
-From `typescript`, `npm run build && npm start`. The host listens on `HOST` (default `0.0.0.0`) and `PORT` (default `8789`), serves generated assets and passes application requests to TanStack Start's built fetch handler. `/healthz` is public and never initializes/calls Todoist. On a new database path, the host runs Prisma `db init`; an imported database is used directly. Database initialization failure stops startup. Graceful shutdown allows in-flight requests up to 20 seconds; pending outbox work survives restart.
+From `typescript`, `npm run build && npm start`. The host listens on `HOST` (default `0.0.0.0`) and `PORT` (default `8789`), serves generated assets and passes application requests to TanStack Start's built fetch handler. `/healthz` is public and never initializes/calls Todoist. The persistence constructor initializes missing tables and adopts existing text UUID tables in place using schema version 1. Database initialization failure stops startup. Graceful shutdown allows in-flight requests up to 20 seconds; pending outbox work survives restart.
 
-The root Dockerfile builds with Node 26 and runs checks, then supplies the actual production artifact and Prisma tooling for initialization/import. Compose preserves bridge-only `172.17.0.1:8789`, host UID/GID, read-only root, writable `/data`, read-only token mount, dropped capabilities and the existing Caddy site. No domain/proxy change is needed. Hermes must verify Docker build/runtime on its Docker-enabled host.
+The root Dockerfile builds with Node 26 and runs checks, then supplies the actual production artifact and production dependencies only. Compose preserves bridge-only `172.17.0.1:8789`, host UID/GID, read-only root, writable `/data`, read-only token mount, dropped capabilities and the existing Caddy site. No domain/proxy change is needed. Hermes must verify Docker build/runtime on its Docker-enabled host.
 
 Environment compatibility:
 
@@ -72,70 +71,6 @@ Cutover sequence: drain old actions and reconcile tombstones; retain old artifac
 
 ## Nonroot, read-only runtime acceptance (Hermes)
 
-Prisma `db init` writes migration refs and snapshots. `prisma.config.ts` places these in `<absolute DATABASE_PATH>.prisma` (also honoring `PLANNER_DB`), alongside the writable database, rather than `/srv/app/typescript/migrations`. A distinct database gets a distinct workspace. Import initializes inside its existing temporary staging directory, so its workspace is removed with staging; an imported database starts without initialization. Contract source and generated `src/prisma` artifacts remain read-only. `PRISMA_MIGRATIONS_DIR` can override the workspace with an explicitly writable absolute directory; leave it unset normally. Contract emission remains a build/development operation. Telemetry is disabled with `PRISMA_DISABLE_TELEMETRY=1`.
+Schema initialization uses direct `node:sqlite` statements and writes only to the selected database. No generated contracts or migration workspace is required. Run `npm run check:runtime` from the full build/test checkout (the slim runtime omits developer tools) under a nonroot, read-only application mount with writable data and temporary directories to verify fresh/restarted/imported startup.
 
-The final image includes the synthetic tests as well as init/import tooling. Run these commands without deployment secrets, live data, or the production Compose env file:
-
-```sh
-docker build -t dinner-planner:verify .
-# Overrides the image UID just as Compose does; only tmpfs data/scratch are writable.
-docker run --rm --read-only --user "$(id -u):$(id -g)" \
-  --cap-drop ALL --security-opt no-new-privileges \
-  --tmpfs /data:rw,mode=1777,size=128m --tmpfs /tmp:rw,mode=1777,size=128m \
-  -e TMPDIR=/data -e PRISMA_DISABLE_TELEMETRY=1 \
-  dinner-planner:verify npm test
-docker run --rm --read-only --user "$(id -u):$(id -g)" \
-  --cap-drop ALL --security-opt no-new-privileges \
-  --tmpfs /data:rw,mode=1777,size=128m --tmpfs /tmp:rw,mode=1777,size=128m \
-  -e TMPDIR=/data -e PRISMA_DISABLE_TELEMETRY=1 \
-  dinner-planner:verify npm run check:runtime
-```
-
-`check:runtime` requires a nonroot UID and proves the app directory rejects writes. Its negative check directs refs to the read-only app directory and requires an EACCES/EROFS error. It then checks fresh production startup, authenticated fake-provider board reads, restart of that database, the actual import CLI with a synthetic legacy backup, and startup of the imported database. All fixtures and workspaces are cleaned up. No browser or real Todoist is required. The 32-test suite separately covers import rollback/refusal, source preservation, and additive initialization of an existing database.
-
-For local Linux permission reproduction without Docker, use a fresh scratch directory with Bubblewrap (run from repository root):
-
-```sh
-runtime_scratch=$(mktemp -d /tmp/planner-readonly.XXXXXX)
-bwrap --ro-bind / / --bind "$runtime_scratch" "$runtime_scratch" \
-  --setenv TMPDIR "$runtime_scratch" --setenv PRISMA_DISABLE_TELEMETRY 1 \
-  --chdir "$PWD/typescript" npm run check:runtime
-# Repeat with npm test in place of npm run check:runtime.
-```
-
-The caller must be nonroot and use Node 26. If the agent sandbox denies piped subprocesses or loopback listeners, run these acceptance commands on Hermes's Docker-enabled host; that restriction is distinct from application filesystem permissions.
-
-The initializer can also be reproduced directly when piped child processes are denied (same `runtime_scratch`, repository root):
-
-```sh
-bwrap --ro-bind / / --bind "$runtime_scratch" "$runtime_scratch" \
-  --setenv TMPDIR "$runtime_scratch" --setenv DATABASE_PATH "$runtime_scratch/fresh.sqlite" \
-  --setenv PRISMA_DISABLE_TELEMETRY 1 --chdir "$PWD/typescript" \
-  node node_modules/prisma/dist/prisma.js db init
-# Negative control: must fail with EROFS opening app migration refs.
-bwrap --ro-bind / / --bind "$runtime_scratch" "$runtime_scratch" \
-  --setenv TMPDIR "$runtime_scratch" --setenv DATABASE_PATH "$runtime_scratch/negative.sqlite" \
-  --setenv PRISMA_MIGRATIONS_DIR "$PWD/typescript/migrations" \
-  --setenv PRISMA_DISABLE_TELEMETRY 1 --chdir "$PWD/typescript" \
-  node node_modules/prisma/dist/prisma.js db init
-```
-
-Slot drag regression and review videos (isolated synthetic SQLite and fake Todoist,
-trusted Chromium CDP touch input on mobile and mouse input on desktop):
-
-```sh
-export PATH=/home/hermes-admin/.hermes/cache/scratch/dinner-node/node_modules/.bin:$PATH
-export TMPDIR=/home/hermes-admin/.hermes/cache/scratch
-npm run build
-npm run record:slots
-```
-
-Run from `typescript/`. The script selects a free loopback port, authenticates
-before recording, and asserts row/finger tracking and intermediate neighbor animation
-while the drag is held. It also verifies order, Save, reload persistence, Revert, touch
-cancellation preserving edited draft, page scrolling, button alternatives and input editing.
-Videos use fresh timestamped `mobile-motion-slot-reorder-*.webm` and
-`desktop-motion-slot-reorder-*.webm` filenames under
-`/home/hermes-admin/.hermes/cache/scratch/dinner-motion-slot-videos/` (override with
-`SLOT_VIDEO_DIR`; optional `SLOT_VIDEO_PORT` and `CHROME_PATH`). No live provider
-or existing database is used. Videos require user review before merge/deployment.
+Schema version 1 creates missing application tables and sets `PRAGMA user_version=1` in one transaction. Existing table names, text UUID IDs, columns and values are preserved, including outbox, settings, sessions and local replay receipts. Existing provider metadata is untouched. Future versions fail closed. Keep a consistent SQLite backup and the old artifact before cutover; restore the backup if subsequent writes must be undone. Run only one mutation worker during cutover.
