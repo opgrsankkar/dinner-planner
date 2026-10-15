@@ -9,8 +9,6 @@ import {
 } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { tmpdir } from "node:os";
-import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { Store, uuidPattern } from "../src/server/store";
 import type { Settings } from "../src/types";
@@ -157,21 +155,6 @@ export async function importLegacy(sourcePath: string, targetPath: string) {
   const staged = join(staging, "planner.sqlite");
   let store: Store | undefined;
   try {
-    const cwd = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-    execFileSync(
-      process.execPath,
-      ["node_modules/prisma/dist/prisma.js", "db", "init"],
-      {
-        cwd,
-        env: {
-          ...process.env,
-          DATABASE_PATH: staged,
-          PLANNER_DB: staged,
-          TMPDIR: process.env.TMPDIR ?? tmpdir(),
-        },
-        stdio: "pipe",
-      },
-    );
     store = new Store(staged);
     const active = slots.filter((slot) => slot.active);
     const aliases: Record<string, string> = {};
@@ -194,22 +177,22 @@ export async function importLegacy(sourcePath: string, targetPath: string) {
       aliases,
       revision: 0,
     };
-    await store.db.transaction(async (tx) => {
+    store.db.transaction((tx) => {
       for (const meal of library)
-        await tx.orm.Library.create({
-          id: meal.id as Parameters<typeof tx.orm.Library.create>[0]["id"],
+        tx.libraryInsert({
+          id: meal.id,
           name: meal.name,
         });
       for (const slot of active)
-        await tx.orm.Slot.create({
-          id: slotId(slot.id) as Parameters<typeof tx.orm.Slot.create>[0]["id"],
+        tx.slotInsert({
+          id: slotId(slot.id),
           name: slot.name,
           time: slot.time,
         });
       // Preserve inactive slots, original IDs/order, all aliases and settings as
       // import metadata; only active slots participate in the planner.
-      await tx.orm.Setting.create({
-        id: settingId as Parameters<typeof tx.orm.Setting.create>[0]["id"],
+      tx.settingInsert({
+        id: settingId,
         value: JSON.stringify({
           ...settings,
           legacyImport: {

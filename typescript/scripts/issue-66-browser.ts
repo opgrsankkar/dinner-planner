@@ -14,7 +14,6 @@ const env = {
   PATH: process.env.PATH ?? "/usr/bin:/bin",
   TMPDIR: process.env.TMPDIR ?? tmpdir(),
   TODOIST_MODE: "fake",
-  PRISMA_DISABLE_TELEMETRY: "1",
   ALLOWED_HOSTS: "127.0.0.1,localhost",
   COOKIE_SECURE: "false",
   DATABASE_PATH: join(directory, "planner.sqlite"),

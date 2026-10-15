@@ -13,7 +13,7 @@ import { DatabaseSync } from "node:sqlite";
 let root: string;
 before(async () => {
   root = await mkdtemp(join(tmpdir(), "planner-local-"));
-  execFileSync(process.execPath, ["node_modules/prisma/dist/prisma.js", "db", "init"], {
+  execFileSync(process.execPath, ["--import", "tsx", "scripts/init-db.ts"], {
     env: { ...process.env, DATABASE_PATH: join(root, "template.sqlite") }, stdio: "pipe",
   });
 });
@@ -40,7 +40,7 @@ test("local plans persist beyond overlays and restart; replay cannot duplicate o
     const saved = (await store.board(f.provider)).cards[0];
     assert.equal(saved.state, "saved");
     assert.ok(saved.confirmedAt > 0);
-    await store.db.orm.Outbox.where({ id: f.input.requestId as `${string}-${string}-${string}-${string}-${string}` }).update({ confirmedAt: "1" });
+    await store.db.outboxUpdate(f.input.requestId, { confirmedAt: "1" });
     await store.close();
     store = new Store(f.path);
     const provider = new LocalPlan(store), worker = new Worker(store, provider);

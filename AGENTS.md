@@ -2,7 +2,7 @@
 
 Read `docs/agent-workflow.md` before working. That project-specific workflow overrides old migration notes.
 
-- Single-user experimental pet project: TanStack Start, React, strict TypeScript, Node 26, Prisma ORM 8, SQLite. Experimental SQLite support is accepted; do not change the stack.
+- Single-user experimental pet project: TanStack Start, React, strict TypeScript, Node 26, direct SQLite via `node:sqlite`. The user approved removing Prisma; retain the rest of the stack.
 - Codex `gpt-6.1-sol` at `low` actually writes code. Hermes/Sol orchestrates and independently verifies. Gemini/Antigravity review is waived by the user; do not launch it or wait for reviewer approval.
 - Start clean from master; do not reuse abandoned Luna migration code. Rewrite as idiomatic full-stack TypeScript covering the same functionality, not a Python-to-Node translation. Frontend components, routing, state, fetching, and API architecture may change freely. Preserve the accepted UI design/layout/styling and user-facing interaction intent, not frontend implementation. Discard generated implementation if it anchors the wrong architecture.
 - In default/live mode, Todoist is authoritative for planned meals; local DB holds library/settings/slots/outbox/cache only. The user-authorized standalone `TODOIST_MODE=local` deployment stores planned meals and replay receipts in SQLite without accessing Todoist. Keep its database separate from live/fake deployments.

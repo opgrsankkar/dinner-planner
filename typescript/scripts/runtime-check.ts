@@ -19,16 +19,12 @@ const directory = await mkdtemp(join(tmpdir(), "planner-runtime-"));
 const password = randomUUID();
 const env = {
   ...process.env,
-  PRISMA_DISABLE_TELEMETRY: "1",
-  PRISMA_MIGRATIONS_DIR: "",
   TODOIST_MODE: "fake", TODOIST_TOKEN: "", TODOIST_TOKEN_FILE: "",
   APP_PASSWORD: password, COOKIE_SECURE: "false",
   ALLOWED_HOSTS: "127.0.0.1", PLANNER_ORIGIN: "http://127.0.0.1:3110",
   PORT: "3110", HOST: "127.0.0.1",
   FAKE_TODOIST_DB: join(directory, "fake.sqlite"),
 };
-// An empty override must not redirect refs back to cwd.
-delete (env as Partial<typeof env>).PRISMA_MIGRATIONS_DIR;
 function cli(args: string[], extra: Record<string, string> = {}) {
   const result = spawnSync(process.execPath, args, { env: { ...env, ...extra }, encoding: "utf8", timeout: 30000 });
   assert.ifError(result.error);
@@ -66,31 +62,10 @@ async function startup(db: string, expectedMeal?: string) {
   }
 }
 try {
-  // Reproduce the old failure without relying on root build success.
-  const negativeDb = join(directory, "negative.sqlite");
-  const appRootMigrations = resolve("prisma");
-  const negative = cli(["node_modules/prisma/dist/prisma.js", "db", "init"], {
-    DATABASE_PATH: negativeDb, PLANNER_DB: negativeDb,
-    PRISMA_MIGRATIONS_DIR: appRootMigrations,
-  });
-  assert.equal(negative.signal, null, "Negative CLI must exit normally");
-  assert.notEqual(negative.status, null, "Negative CLI must report an exit status");
-  assert.notEqual(negative.status, 0, "App-root migration refs must fail read-only");
-  // Prisma can report ENOENT for mkdir on a read-only overlay; the direct write probe above proves permissions.
-  const negativeResult = (negative.stdout + "\n" + negative.stderr).split("\n")
-    .filter((line) => line.trimStart().startsWith("{"))
-    .map((line) => JSON.parse(line))
-    .find((event) => event.kind === "result");
-  assert.ok(negativeResult, "Negative CLI must emit a structured result");
-  assert.equal(negativeResult.envelope.commandId, "db.init");
-  assert.equal(negativeResult.envelope.ok, false);
-  assert.equal(typeof negativeResult.envelope.error?.why, "string");
-  assert.ok(negativeResult.envelope.error.why.includes(`${appRootMigrations}/`),
-    "Negative CLI failure must mention the forced app-root migrations path");
   const fresh = join(directory, "fresh.sqlite");
   await startup(fresh);
-  assert.ok(existsSync(`${fresh}.prisma/app/refs/db.json`));
-  await startup(fresh); // Existing fresh DB startup skips initialization.
+  assert.ok(existsSync(fresh));
+  await startup(fresh); // Reopening is idempotent.
   const source = join(directory, "legacy.sqlite"), target = join(directory, "imported.sqlite");
   const legacy = new DatabaseSync(source);
   legacy.exec(`CREATE TABLE meal_library(id TEXT PRIMARY KEY,name TEXT,position INTEGER);
@@ -106,8 +81,7 @@ try {
   const imported = cli(["--import", "tsx", "scripts/import-legacy.ts", "--source", source, "--target", target]);
   assert.equal(imported.status, 0, imported.stdout + imported.stderr);
   await startup(target, "Synthetic imported meal");
-  assert.equal(existsSync(`${target}.prisma`), false, "Imported startup skips init; staging workspace is cleaned up");
-  console.log("Nonroot/read-only acceptance passed: old refs failure, fresh startup/restart, import CLI, imported startup.");
+  console.log("Nonroot/read-only acceptance passed: fresh startup/restart, import CLI, imported startup.");
 } finally {
   await rm(directory, { recursive: true, force: true });
 }

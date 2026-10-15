@@ -3,7 +3,6 @@ import { Readable } from "node:stream";
 import { readFile, stat, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve, dirname, extname, sep } from "node:path";
-import { execFileSync } from "node:child_process";
 
 const db = resolve(
   process.env.DATABASE_PATH ??
@@ -11,15 +10,6 @@ const db = resolve(
     ".local/planner.sqlite",
 );
 await mkdir(dirname(db), { recursive: true });
-if (!existsSync(db))
-  execFileSync(
-    process.execPath,
-    ["node_modules/prisma/dist/prisma.js", "db", "init"],
-    {
-      env: { ...process.env, DATABASE_PATH: db, PLANNER_DB: db },
-      stdio: "inherit",
-    },
-  );
 if (!(process.env.APP_PASSWORD ?? process.env.PLANNER_PASSWORD))
   throw new Error("APP_PASSWORD is required");
 if (process.env.TODOIST_MODE && !["live", "fake", "local"].includes(process.env.TODOIST_MODE))
