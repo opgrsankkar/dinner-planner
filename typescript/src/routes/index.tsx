@@ -5,6 +5,7 @@ import { WeekPicker } from "../WeekPicker";
 import type { Board, Meal, Card, Slot } from "../types";
 import { defaultPlanPlacement } from "../plan-default";
 import { orderLibrary } from "../library-order";
+import { isPastSlot } from "../past-slot";
 import { requestId as newRequestId } from "../request-id";
 import { libraryDragPreview, sameLibraryDragPreview, type DragPreview } from "../drag-preview";
 export const Route = createFileRoute("/")({ component: Planner });
@@ -412,6 +413,9 @@ export function Planner() {
       date,
       time: slot.time,
       projectId: board!.projectId,
+      // Show the strikethrough immediately for an already-past meal; the server
+      // records the same intent at submission and completes it in Todoist.
+      completed: isPastSlot(date, slot.time) || undefined,
       state: "pending",
       error: "",
       confirmedAt: 0,

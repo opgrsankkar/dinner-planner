@@ -26,7 +26,7 @@ async function fixture() {
   const meal = await store.addLibrary("Local dinner");
   const provider = new LocalPlan(store);
   const board = await store.board(provider);
-  const input = { requestId: randomUUID(), mealId: meal.id, slotId: board.slots[0].id, date: "2026-10-12" };
+  const input = { requestId: randomUUID(), mealId: meal.id, slotId: board.slots[0].id, date: "2030-10-12" };
   return { path, store, provider, input, board, worker: new Worker(store, provider) };
 }
 
@@ -48,13 +48,13 @@ test("local plans persist beyond overlays and restart; replay cannot duplicate o
     assert.equal(board.integrationError, "");
     assert.equal(board.cards[0].id, saved.id);
     await store.place(f.input, board.projectId);
-    const move = { requestId: randomUUID(), taskId: saved.id, kind: "move" as const, slotId: board.slots[1].id, date: "2026-10-13" };
+    const move = { requestId: randomUUID(), taskId: saved.id, kind: "move" as const, slotId: board.slots[1].id, date: "2030-10-13" };
     await store.change(move, provider);
     await worker.tick();
     await store.change(move, provider);
     assert.equal((await provider.list(board.projectId)).length, 1);
     assert.equal((await store.board(provider)).cards[0].date, move.date);
-    await assert.rejects(store.change({ ...move, date: "2026-10-14" }, provider), /another operation/);
+    await assert.rejects(store.change({ ...move, date: "2030-10-14" }, provider), /another operation/);
     await store.removeLibrary(f.input.mealId);
     assert.equal((await provider.list(board.projectId)).length, 1);
     const deletion = { requestId: randomUUID(), taskId: saved.id, kind: "delete" as const };

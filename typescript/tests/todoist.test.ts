@@ -5,6 +5,7 @@ import {
   TodoistError,
   remoteMeal,
 } from "../src/server/todoist-api";
+import { completionRequestId } from "../src/server/todoist";
 import type { Placement } from "../src/types";
 const project = "6XGgm6PHrGgMpCFX";
 const requestId = "f72d2fa1-2705-469c-826c-a13d1076e191";
@@ -294,4 +295,85 @@ test("pagination loop and malformed envelopes fail; external changes appear afte
   assert.equal((await f.api.list(project))[0].name, "Dal");
   f.advance(15001);
   assert.equal((await f.api.list(project))[0].name, title);
+});
+test("close uses a distinct stable request ID and survives global request-ID dedup", async () => {
+  let completed = false;
+  const completedTask = () => ({
+    id: "6XGgmFVcrG5RRjVr",
+    project_id: project,
+    content: "Dal",
+    description: `meal-planner-request-id: ${requestId}`,
+    due: { date: "2026-10-01T13:00:00+05:30" },
+    checked: completed,
+    ...(completed ? { completed_at: "2026-10-01T13:05:00Z" } : {}),
+  });
+  const seen = new Map<string, Response>();
+  const closeIds: string[] = [];
+  let creates = 0;
+  // Simulates Todoist's global X-Request-Id dedup: a repeated ID is answered
+  // with the first response and never re-executed on the server.
+  const fetcher: typeof fetch = async (url, init) => {
+    const call = {
+      url: new URL(String(url)),
+      method: init?.method ?? "GET",
+      headers: new Headers(init?.headers),
+    };
+    if (call.url.pathname.endsWith("projects"))
+      return json({ results: [{ id: project, name: "Meals" }], next_cursor: null });
+    const key = call.headers.get("X-Request-Id") ?? "";
+    if (key && seen.has(key)) return seen.get(key)!.clone();
+    let response: Response;
+    if (call.method === "POST" && call.url.pathname === "/api/v1/tasks") {
+      creates++;
+      response = json(completedTask());
+    } else if (call.method === "POST" && call.url.pathname.endsWith("/close")) {
+      closeIds.push(key);
+      completed = true;
+      response = new Response(null, { status: 204 });
+    } else if (call.method === "GET" && call.url.pathname.startsWith("/api/v1/tasks/")) {
+      response = json(completedTask());
+    } else response = json({ results: [], next_cursor: null });
+    if (key) seen.set(key, response.clone());
+    return response;
+  };
+  const api = new TodoistApi("synthetic-token", fetcher);
+  const created = await api.create(placement, requestId);
+  const closeRequest = completionRequestId(requestId);
+  assert.notEqual(closeRequest, requestId, "close must not reuse the create request ID");
+  await api.complete(created.id, project, closeRequest);
+  assert.equal(completed, true);
+  assert.deepEqual(closeIds, [closeRequest]);
+  assert.equal(creates, 1);
+  // A completion retry reconciles through GET and never re-closes.
+  await api.complete(created.id, project, closeRequest);
+  assert.equal(closeIds.length, 1);
+  // The derived key is stable across calls and never equals the create key.
+  assert.equal(completionRequestId(requestId), closeRequest);
+});
+test("complete fails closed when the meal is missing instead of reporting false success", async () => {
+  const f = fixture((call) => {
+    if (call.url.pathname.endsWith("projects"))
+      return json({ results: [{ id: project, name: "Meals" }], next_cursor: null });
+    return new Response(null, { status: 404 });
+  });
+  await assert.rejects(
+    f.api.complete("missing-task", project, completionRequestId(requestId)),
+    /missing from Meals/,
+  );
+});
+test("a close 404 after a task-exists GET is not treated as completion", async () => {
+  const f = fixture((call) => {
+    if (call.url.pathname.endsWith("projects"))
+      return json({ results: [{ id: project, name: "Meals" }], next_cursor: null });
+    if (call.method === "GET") return json(task());
+    return new Response(null, { status: 404 });
+  });
+  await assert.rejects(
+    f.api.complete(task().id, project, completionRequestId(requestId)),
+    /\(404\)/,
+  );
+  assert.deepEqual(
+    f.calls.map((call) => call.method),
+    ["GET", "POST"],
+  );
 });

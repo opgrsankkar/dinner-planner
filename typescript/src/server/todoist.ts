@@ -1,6 +1,28 @@
 import { DatabaseSync } from "node:sqlite";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Placement, RemoteMeal } from "../types";
+// X-Request-Id deduplication is global to a Todoist token, so the close request
+// must not reuse the create request's ID or it can be suppressed as a duplicate.
+// Derive a distinct, stable, UUID-shaped key per stage from the create ID so
+// every retry reuses exactly the same completion key.
+export function completionRequestId(createRequestId: string): string {
+  const derive = (salt: number) =>
+    createHash("sha256")
+      .update(`meal-planner-close:${salt}:${createRequestId}`)
+      .digest("hex")
+      .slice(0, 32);
+  let hex = derive(0);
+  for (let salt = 1; salt < 8; salt++) {
+    const candidate = hex.split("");
+    candidate[12] = "4";
+    candidate[16] = "8";
+    const value = candidate.join("");
+    const uuid = `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20, 32)}`;
+    if (uuid !== createRequestId) return uuid;
+    hex = derive(salt);
+  }
+  throw new Error("Could not derive a distinct completion request ID");
+}
 // Providers enforce task project ownership before writes, durable request-ID
 // idempotency, and delete success/404 acknowledgement without a follow-up read.
 export interface Todoist {
@@ -16,6 +38,7 @@ export interface Todoist {
     requestId: string,
   ): Promise<RemoteMeal>;
   delete(taskId: string, projectId: string, requestId: string): Promise<void>;
+  complete(taskId: string, projectId: string, requestId: string): Promise<void>;
   create(input: Placement, requestId: string): Promise<RemoteMeal>;
 }
 // Offline provider models remote authority in a separate file, never planner tables.
@@ -27,6 +50,9 @@ export class FakeTodoist implements Todoist {
   moveFailBefore = 0;
   deleteFailBefore = 0;
   deleteCalls = 0;
+  completeCalls = 0;
+  completeFailBefore = 0;
+  completeLoseResponse = 0;
   failBefore = 0;
   loseResponse = 0;
   delayMs = 1200;
@@ -157,6 +183,40 @@ export class FakeTodoist implements Todoist {
       // Missing task is a successful 404 acknowledgement.
       return null;
     });
+  }
+  // Completing is naturally idempotent: the provider is only mutated when the
+  // task is not already complete, so a retry after a lost acknowledgement is a
+  // no-op and can never create another task.
+  async complete(
+    taskId: string,
+    projectId: string,
+    _requestId: string,
+  ): Promise<void> {
+    this.completeCalls++;
+    await new Promise((resolve) => setTimeout(resolve, this.delayMs));
+    if (this.completeFailBefore > 0) {
+      this.completeFailBefore--;
+      throw new Error("Fake Todoist complete unavailable");
+    }
+    const rows = this.db
+      .prepare("SELECT request_id, body FROM tasks")
+      .all() as { request_id: string; body: string }[];
+    const row = rows.find(
+      (row) => (JSON.parse(row.body) as RemoteMeal).id === taskId,
+    );
+    if (!row) return;
+    const task = JSON.parse(row.body) as RemoteMeal;
+    if (task.projectId !== projectId) throw new Error("Task ownership changed");
+    if (!task.completed) {
+      task.completed = true;
+      this.db
+        .prepare("UPDATE tasks SET body = ? WHERE request_id = ?")
+        .run(JSON.stringify(task), row.request_id);
+    }
+    if (this.completeLoseResponse > 0) {
+      this.completeLoseResponse--;
+      throw new Error("Fake Todoist completion response lost after write");
+    }
   }
   close() {
     this.db.close();

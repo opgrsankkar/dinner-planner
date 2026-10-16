@@ -42,7 +42,7 @@ async function fixture() {
     requestId: randomUUID(),
     mealId: board.library[0].id,
     slotId: board.slots[0].id,
-    date: "2026-10-01",
+    date: "2030-10-01",
   };
   const project = await provider.mealsProject();
   let closed = false;
@@ -169,7 +169,7 @@ test("concurrent repeated placement is idempotent and altered reuse is rejected"
     );
     assert.equal((await f.store.db.outboxAll()).length, 1);
     await assert.rejects(
-      f.store.place({ ...f.input, date: "2026-10-02" }, f.project.id),
+      f.store.place({ ...f.input, date: "2030-10-02" }, f.project.id),
       /another placement/,
     );
     await Promise.all([f.worker.tick(), f.worker.tick()]);
@@ -652,7 +652,7 @@ test("real adapter uncertain create survives worker restart and invisible marker
               project_id: projectId,
               content: "Idli & sambar",
               description: `meal-planner-request-id: ${f.input.requestId}`,
-              due: { date: "2026-10-01T08:00:00+05:30" },
+              due: { date: "2030-10-01T08:00:00+05:30" },
             },
           ]
         : [],

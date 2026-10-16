@@ -7,6 +7,9 @@ export type Placement = {
   slotId: string;
   time: string;
   projectId: string;
+  // Persisted intent, decided at submission: create the meal then mark it
+  // complete because its date+slot time had already passed.
+  complete?: boolean;
 };
 export type RemoteMeal = {
   id: string;
