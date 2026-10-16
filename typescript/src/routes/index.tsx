@@ -4,6 +4,7 @@ import { SettingsPage } from "../settings";
 import { WeekPicker } from "../WeekPicker";
 import type { Board, Meal, Card, Slot } from "../types";
 import { defaultPlanPlacement } from "../plan-default";
+import { orderLibrary } from "../library-order";
 import { requestId as newRequestId } from "../request-id";
 export const Route = createFileRoute("/")({ component: Planner });
 type Intent = {
@@ -78,6 +79,7 @@ export function Planner() {
   const [error, setError] = useState("");
   const [password, setPassword] = useState("");
   const [search, setSearch] = useState("");
+  const [recentMeals, setRecentMeals] = useState<string[]>([]);
   const [libraryAdding, setLibraryAdding] = useState(false);
   const [libraryInvalid, setLibraryInvalid] = useState(false);
   const [libraryFeedback, setLibraryFeedback] = useState("");
@@ -267,7 +269,16 @@ export function Planner() {
     setLibraryFeedback("");
     setLibraryError("");
     try {
-      await post("/api/library", { name: trimmed });
+      const added = (await post("/api/library", { name: trimmed })) as Meal | null;
+      if (
+        added &&
+        typeof added.id === "string" &&
+        !board?.library.some((meal) => meal.id === added.id)
+      )
+        setRecentMeals((previous) => [
+          added.id,
+          ...previous.filter((id) => id !== added.id),
+        ]);
       setSearch("");
       setLibraryFeedback(`Added ${trimmed} to the meal library.`);
       await refresh();
@@ -1030,7 +1041,7 @@ export function Planner() {
               <Icon name="trash-2" />
             </div>
             <div className="library-list">
-              {board.library
+              {orderLibrary(board.library, recentMeals)
                 .filter((meal) =>
                   meal.name.toLowerCase().includes(search.trim().toLowerCase()),
                 )
