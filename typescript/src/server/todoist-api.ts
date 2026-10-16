@@ -298,6 +298,13 @@ export class TodoistApi implements Todoist {
       });
     return entry.flight;
   }
+  // A committed write makes every cached listing for that project stale. Drop
+  // the entries (including any in-flight one) so the next listing refetches
+  // instead of replaying a pre-mutation snapshot.
+  private invalidate(projectId: string) {
+    for (const key of [...this.cache.keys()])
+      if (key.startsWith(projectId + ":")) this.cache.delete(key);
+  }
   async get(taskId: string, projectId: string): Promise<RemoteMeal | null> {
     const value = await this.request(
       `/tasks/${encodeURIComponent(taskId)}`,
@@ -329,7 +336,9 @@ export class TodoistApi implements Todoist {
       requestId,
     );
     try {
-      return remoteMeal(value);
+      const task = remoteMeal(value);
+      this.invalidate(input.projectId);
+      return task;
     } catch {
       throw new TodoistError(
         "Create acknowledgement invalid; result is uncertain",
@@ -352,6 +361,7 @@ export class TodoistApi implements Todoist {
       ? remoteMeal(value)
       : await this.get(input.taskId, input.projectId);
     if (!updated) throw new TodoistError("Moved task is not readable yet");
+    this.invalidate(input.projectId);
     return updated;
   }
   async delete(taskId: string, projectId: string, requestId: string) {
@@ -366,6 +376,7 @@ export class TodoistApi implements Todoist {
       requestId,
       true,
     );
+    this.invalidate(projectId);
   }
   async complete(taskId: string, projectId: string, requestId: string) {
     const task = await this.get(taskId, projectId);
@@ -387,5 +398,6 @@ export class TodoistApi implements Todoist {
       undefined,
       requestId,
     );
+    this.invalidate(projectId);
   }
 }

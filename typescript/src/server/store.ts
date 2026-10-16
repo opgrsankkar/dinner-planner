@@ -380,9 +380,15 @@ export class Store {
         )
       )
         throw new Error("Meal already has a pending change");
-      const task = (await todoist.list(project.id)).find(
-        (task) => task.id === input.taskId && task.projectId === project.id,
-      );
+      // Prefer an authoritative, task-scoped read. A cached active listing can
+      // lag behind a create/rename, which must never block deleting a meal the
+      // planner just acknowledged saving. Providers without get() fall back to a
+      // forced-fresh listing.
+      const task = todoist.get
+        ? await todoist.get(input.taskId, project.id)
+        : (await todoist.list(project.id, { fresh: true })).find(
+            (task) => task.id === input.taskId && task.projectId === project.id,
+          );
       if (!task || task.completed)
         throw new Error(
           "Meal is missing, completed, or does not belong to Meals",
