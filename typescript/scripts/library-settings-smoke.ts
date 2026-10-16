@@ -99,6 +99,8 @@ try {
   await page.getByLabel("Search meals").fill("PASTA");
   assert.equal(await page.locator(".folio-library-row").count(), 1);
   const remove = page.getByRole("button", {name: "Remove Vegetable pasta from library"});
+  // Desktop (#78): compact icon action blends into the row when not hovered.
+  assert.equal(await remove.evaluate(el => getComputedStyle(el).backgroundColor), 'rgba(0, 0, 0, 0)');
   page.once("dialog", dialog => dialog.dismiss());
   await remove.click();
   assert.equal((await calls()).length, 4);
@@ -110,8 +112,9 @@ try {
   await remove.click();
   await page.waitForFunction(() => (window as any).calls.length === 5);
   await expect(remove).toBeDisabled();
-  assert.equal(await remove.evaluate(el => el.getBoundingClientRect().width), 44);
-  assert.equal(await remove.evaluate(el => el.getBoundingClientRect().height), 44);
+  // Desktop (#78): compact, row-blended icon actions replace the swipe buttons.
+  assert.equal(await remove.evaluate(el => el.getBoundingClientRect().width), 40);
+  assert.equal(await remove.evaluate(el => el.getBoundingClientRect().height), 40);
   await release();
   await remove.waitFor({state: "detached"});
   assert.equal(await page.getByTestId("planned").textContent(), "Planned: Vegetable pasta");

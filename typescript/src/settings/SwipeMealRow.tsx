@@ -10,13 +10,23 @@ export function SwipeMealRow({ meal, hint, removing, remove, action }: {
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // Touch-first devices keep the swipe affordance and hint; a fine primary
+  // pointer (mouse/trackpad) gets quiet, always-visible action buttons instead.
+  const [coarsePointer, setCoarsePointer] = useState(false);
   const busy = useRef(false);
   const row = useRef<HTMLDivElement>(null);
   const animation = useRef<Animation | null>(null);
   const gesture = useRef<{ id: number; x: number; y: number; direction: "horizontal" | "vertical" | null } | null>(null);
   const stopHint = () => { animation.current?.cancel(); animation.current = null; };
   useEffect(() => {
-    if (!hint || !row.current || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const media = matchMedia("(pointer: coarse)");
+    const update = () => setCoarsePointer(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  useEffect(() => {
+    if (!hint || !coarsePointer || !row.current || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const observer = new IntersectionObserver(entries => {
       if (!entries.some(entry => entry.isIntersecting)) return;
       observer.disconnect();
@@ -29,7 +39,7 @@ export function SwipeMealRow({ meal, hint, removing, remove, action }: {
     });
     observer.observe(row.current);
     return () => { observer.disconnect(); stopHint(); };
-  }, [hint]);
+  }, [hint, coarsePointer]);
   async function save() {
     if (busy.current) return;
     const name = draft.trim();
@@ -45,7 +55,10 @@ export function SwipeMealRow({ meal, hint, removing, remove, action }: {
   }
   return <div ref={row} className={`folio-library-row${editing ? " is-editing" : ""}`}
     data-meal-id={meal.id} data-reveal={offset > 0 ? "edit" : offset < 0 ? "delete" : "closed"}
-    tabIndex={0} aria-label={`${meal.name}. Swipe right to edit, left to delete. Use Tab for actions.`}
+    tabIndex={0}
+    aria-label={coarsePointer
+      ? `${meal.name}. Swipe right to edit, left to delete. Use Tab for actions.`
+      : `${meal.name}. Use the edit or remove buttons.`}
     onFocus={stopHint} onKeyDown={event => {
       if (event.target !== event.currentTarget) return;
       if (event.key === "Escape") setOffset(0);
@@ -53,20 +66,9 @@ export function SwipeMealRow({ meal, hint, removing, remove, action }: {
         event.preventDefault(); setOffset(event.key === "ArrowLeft" ? -48 : 48);
       }
     }}>
-    <button type="button" className="folio-library-edit folio-library-swipe-action"
-      aria-label={`Edit ${meal.name}`} disabled={saving || removing}
-      onClick={() => { stopHint(); setDraft(meal.name); setError(""); setEditing(true); setOffset(0); }}>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6ZM14 5l5 5" /></svg>
-    </button>
-    <button type="button" className="folio-library-remove folio-library-swipe-action"
-      aria-label={`Remove ${meal.name} from library`} disabled={removing || saving} aria-busy={removing}
-      onClick={remove}>
-      {removing ? <span className="folio-library-spinner" aria-hidden="true" /> :
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7" /></svg>}
-    </button>
     <div className="folio-library-surface" style={{ transform: `translateX(${offset}px)` }}
       onPointerDown={event => {
-        if (editing || removing || event.button !== 0) return;
+        if (editing || removing || event.button !== 0 || event.pointerType !== "touch") return;
         stopHint(); gesture.current = { id: event.pointerId, x: event.clientX, y: event.clientY, direction: null };
       }}
       onPointerMove={event => {
@@ -96,5 +98,16 @@ export function SwipeMealRow({ meal, hint, removing, remove, action }: {
         {error && <span role="alert">{error}</span>}
       </form> : <span className="folio-library-name">{meal.name}</span>}
     </div>
+    <button type="button" className="folio-library-edit folio-library-swipe-action"
+      aria-label={`Edit ${meal.name}`} disabled={saving || removing}
+      onClick={() => { stopHint(); setDraft(meal.name); setError(""); setEditing(true); setOffset(0); }}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6ZM14 5l5 5" /></svg>
+    </button>
+    <button type="button" className="folio-library-remove folio-library-swipe-action"
+      aria-label={`Remove ${meal.name} from library`} disabled={removing || saving} aria-busy={removing}
+      onClick={remove}>
+      {removing ? <span className="folio-library-spinner" aria-hidden="true" /> :
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7" /></svg>}
+    </button>
   </div>;
 }

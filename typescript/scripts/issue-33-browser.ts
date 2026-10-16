@@ -117,17 +117,26 @@ try {
       .folio-library .folio-library-row:is(:focus-visible, :has(button:focus-visible)):not(.is-editing) .folio-library-surface,
       .folio-library .folio-library-row:hover:not(.is-editing) .folio-library-surface { padding-left: 64px; padding-right: 64px; }
     `});
-    await expect.poll(() => first.locator('.folio-library-surface').evaluate(el => el.getAnimations().length)).toBeGreaterThan(0);
-    const frames = await first.locator('.folio-library-surface').evaluate(el => (el.getAnimations()[0].effect as KeyframeEffect).getKeyframes());
-    assert.ok(frames.some(f => f.transform === 'translateX(-48px)') && frames.some(f => f.transform === 'translateX(48px)'));
-    await page.waitForTimeout(2300);
-    assert.equal(await first.locator('.folio-library-surface').evaluate(el => getComputedStyle(el).transform), 'matrix(1, 0, 0, 1, 0, 0)');
-    await page.mouse.move(1, 1);
+    if (width < 500) {
+      await expect.poll(() => first.locator('.folio-library-surface').evaluate(el => el.getAnimations().length)).toBeGreaterThan(0);
+      const frames = await first.locator('.folio-library-surface').evaluate(el => (el.getAnimations()[0].effect as KeyframeEffect).getKeyframes());
+      assert.ok(frames.some(f => f.transform === 'translateX(-48px)') && frames.some(f => f.transform === 'translateX(48px)'));
+      await page.waitForTimeout(2300);
+      assert.equal(await first.locator('.folio-library-surface').evaluate(el => getComputedStyle(el).transform), 'matrix(1, 0, 0, 1, 0, 0)');
+    } else {
+      // Desktop (#78): a fine pointer must not replay the touch swipe hint.
+      assert.equal(await first.locator('.folio-library-surface').evaluate(el => el.getAnimations().length), 0);
+      assert.equal(await first.locator('.folio-library-surface').evaluate(el => getComputedStyle(el).transform), 'none');
+    }
+    // A real mouse event or a full-page screenshot on the emulated touch
+    // context can make Chromium report a fine pointer and legitimately switch
+    // to the desktop layout (#78); avoid both there so touch stays touch-first.
+    if (width >= 500) await page.mouse.move(1, 1);
     await rowMeasurements('before');
-    await page.screenshot({ path: join(artifacts, `issue-34-before-${width}-${theme}.png`), fullPage: true });
+    await page.screenshot({ path: join(artifacts, `issue-34-before-${width}-${theme}.png`), fullPage: width >= 500 });
     if (process.env.ISSUE_34_BASELINE === '1') await page.locator('style').last().evaluate(style => style.remove());
     await rowMeasurements('after');
-    await page.screenshot({ path: join(artifacts, `issue-34-after-${width}-${theme}.png`), fullPage: true });
+    await page.screenshot({ path: join(artifacts, `issue-34-after-${width}-${theme}.png`), fullPage: width >= 500 });
     const name = await first.locator('.folio-library-name').innerText(), mealId = await first.getAttribute('data-meal-id');
     let mutations = 0; page.on('request', req => { if (req.method() === 'POST' && /\/api\/library/.test(req.url())) mutations++; });
     const cdp = await context.newCDPSession(page);
@@ -139,7 +148,6 @@ try {
       await cdp.send('Input.dispatchTouchEvent', { type: cancel ? 'touchCancel' : 'touchEnd', touchPoints: [] });
     }
     if (width < 500) {
-      await page.mouse.move(1, 1);
       await swipe(-80); await expect(first).toHaveAttribute('data-reveal', 'delete');
       await expect.poll(() => first.locator('.folio-library-surface').evaluate(el => getComputedStyle(el).transform)).toBe('matrix(1, 0, 0, 1, -48, 0)');
       await page.screenshot({ path: join(artifacts, `swipe-delete-${theme}.png`) });
@@ -167,10 +175,16 @@ try {
         libraryTouchEvents: { type: string; trusted: boolean; action: string }[];
       }).libraryTouchEvents.some(event => event.type === 'click' && event.trusted && event.action === `Edit ${name}`), name)).toBe(true);
     } else {
-      await first.hover(); assert.equal(await first.locator('.folio-library-surface').evaluate(el => getComputedStyle(el).pointerEvents), 'none');
+      // Desktop (#78): quiet actions sit on the right, visible without a swipe.
+      await first.hover();
+      const desktopEdit = first.getByRole('button', { name: `Edit ${name}`, exact: true });
+      const desktopRemove = first.getByRole('button', { name: `Remove ${name} from library`, exact: true });
+      await expect(desktopEdit).toBeVisible(); await expect(desktopRemove).toBeVisible();
+      assert.equal(await first.locator('.folio-library-surface').evaluate(el => getComputedStyle(el).pointerEvents), 'auto');
+      assert.ok((await desktopEdit.boundingBox())!.x > (await first.locator('.folio-library-name').boundingBox())!.x, 'edit icon sits to the right of the name');
       await page.mouse.move(0, 0); await first.focus(); await page.keyboard.press('ArrowRight');
       await expect(first).toHaveAttribute('data-reveal', 'edit'); await page.keyboard.press('Tab');
-      await expect(first.getByRole('button', { name: `Edit ${name}`, exact: true })).toBeFocused(); await page.keyboard.press('Enter');
+      await expect(desktopEdit).toBeFocused(); await page.keyboard.press('Enter');
     }
     const draft = first.getByRole('textbox'); await draft.fill('  '); await draft.press('Enter');
     await expect(first.getByRole('alert')).toContainText('between 1 and 120'); assert.equal(mutations, 0);
@@ -219,7 +233,10 @@ try {
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme); await page.waitForTimeout(600);
     await expect(library.locator('.folio-library-hint')).toHaveCount(0);
     await expect(library).not.toContainText('Swipe right to edit, left to delete.');
-    await expect(rows.first()).toHaveAttribute('aria-label', /Swipe right to edit, left to delete\. Use Tab for actions\./);
+    if (width < 500)
+      await expect(rows.first()).toHaveAttribute('aria-label', /Swipe right to edit, left to delete\. Use Tab for actions\./);
+    else
+      await expect(rows.first()).toHaveAttribute('aria-label', /Use the edit or remove buttons\./);
     assert.equal(await rows.first().locator('.folio-library-surface').evaluate(el => el.getAnimations().length), 0);
     assert.equal(await rows.first().locator('.folio-library-surface').evaluate(el => getComputedStyle(el).transitionDuration), '0s');
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
