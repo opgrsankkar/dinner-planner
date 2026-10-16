@@ -96,18 +96,34 @@ function due(input: Placement) {
   // expresses Asia/Kolkata exactly, without relying on the account timezone.
   return { due_datetime: `${input.date}T${input.time}:00+05:30` };
 }
+// A date belongs to a weekly view when it falls in the seven local (Asia/Kolkata)
+// days starting at the requested Monday. Weekly listings include every active
+// task plus that week's completed history.
+function weekContains(date: string, week: string) {
+  if (!validDay(date) || !validDay(week)) return false;
+  const start = Date.parse(week + "T00:00:00+05:30");
+  const day = Date.parse(date + "T00:00:00+05:30");
+  return day >= start && day < start + 7 * 86400000;
+}
+type CacheEntry = {
+  value?: RemoteMeal[];
+  until: number;
+  error?: unknown;
+  flight?: Promise<RemoteMeal[]>;
+};
+type OverlayEntry = { task: RemoteMeal | null; at: number };
+// A confirmed write is overlaid on listings for a bounded window so provider
+// eventual consistency cannot momentarily undo it. The window must outlast the
+// longest listing TTL (60s for weekly history); a longer window would hide
+// unrelated external edits to the same task, and an unbounded one becomes a
+// second source of truth.
+const overlayTtlMs = 120000;
+const overlayLimit = 128;
 export class TodoistApi implements Todoist {
   private project?: { value: { id: string; name: string }; until: number };
   private projectFlight?: Promise<{ id: string; name: string }>;
-  private cache = new Map<
-    string,
-    {
-      value?: RemoteMeal[];
-      until: number;
-      error?: unknown;
-      flight?: Promise<RemoteMeal[]>;
-    }
-  >();
+  private cache = new Map<string, CacheEntry>();
+  private overlays = new Map<string, OverlayEntry>();
   private blockedUntil = 0;
   private projectError?: { error: unknown; until: number };
   constructor(
@@ -246,17 +262,27 @@ export class TodoistApi implements Todoist {
     projectId: string,
     options: { week?: string; fresh?: boolean } = {},
   ) {
+    const base = await this.fetch(projectId, options);
+    return this.withOverlay(projectId, base, options.week);
+  }
+  // Provider-truth listing. The cache and any in-flight request hold only the
+  // provider snapshot; acknowledged writes are merged by list() so an older
+  // in-flight response can never erase a confirmed write.
+  private async fetch(
+    projectId: string,
+    options: { week?: string; fresh?: boolean } = {},
+  ) {
     const key = projectId + ":" + (options.week ?? "active");
     const existing = this.cache.get(key);
     if (existing?.error && existing.until > this.now()) throw existing.error;
     if (!options.fresh && existing?.value && existing.until > this.now())
       return existing.value;
     if (existing?.flight) return existing.flight;
-    const entry = existing ?? { until: 0 };
+    const entry: CacheEntry = existing ?? { until: 0 };
     this.cache.set(key, entry);
     entry.flight = (async () => {
       const active = options.week
-        ? await this.list(projectId)
+        ? await this.fetch(projectId)
         : (await this.pages("/tasks", { project_id: projectId })).map((t) =>
             remoteMeal(t),
           );
@@ -298,12 +324,47 @@ export class TodoistApi implements Todoist {
       });
     return entry.flight;
   }
-  // A committed write makes every cached listing for that project stale. Drop
-  // the entries (including any in-flight one) so the next listing refetches
-  // instead of replaying a pre-mutation snapshot.
-  private invalidate(projectId: string) {
-    for (const key of [...this.cache.keys()])
-      if (key.startsWith(projectId + ":")) this.cache.delete(key);
+  // Record a provider-confirmed write. The overlay is keyed by task ID so later
+  // operations on the same task supersede earlier ones, and it is pruned by both
+  // age and a hard cap so it stays bounded.
+  private acknowledge(task: RemoteMeal | null, id?: string) {
+    const key = task?.id ?? id;
+    if (!key) return;
+    this.overlays.set(key, { task, at: this.now() });
+    const cutoff = this.now() - overlayTtlMs;
+    for (const [entryKey, entry] of this.overlays)
+      if (entry.at <= cutoff) this.overlays.delete(entryKey);
+    while (this.overlays.size > overlayLimit) {
+      let oldestKey = "";
+      let oldestAt = Infinity;
+      for (const [entryKey, entry] of this.overlays)
+        if (entry.at < oldestAt) {
+          oldestAt = entry.at;
+          oldestKey = entryKey;
+        }
+      this.overlays.delete(oldestKey);
+    }
+  }
+  // Merge acknowledged writes into a provider snapshot for one scope. Active
+  // and weekly views both include every active task; a completed write only
+  // belongs to a weekly view when its due date falls in that week's history.
+  private withOverlay(projectId: string, base: RemoteMeal[], week?: string) {
+    if (!this.overlays.size) return base;
+    const cutoff = this.now() - overlayTtlMs;
+    const tasks = new Map(base.map((task) => [task.id, task]));
+    for (const [key, entry] of this.overlays) {
+      if (entry.at <= cutoff) continue;
+      const task = entry.task;
+      if (!task) {
+        tasks.delete(key);
+        continue;
+      }
+      if (task.projectId !== projectId) continue;
+      if (!task.completed || (week !== undefined && weekContains(task.date, week)))
+        tasks.set(task.id, task);
+      else tasks.delete(task.id);
+    }
+    return [...tasks.values()];
   }
   async get(taskId: string, projectId: string): Promise<RemoteMeal | null> {
     const value = await this.request(
@@ -337,7 +398,7 @@ export class TodoistApi implements Todoist {
     );
     try {
       const task = remoteMeal(value);
-      this.invalidate(input.projectId);
+      this.acknowledge(task);
       return task;
     } catch {
       throw new TodoistError(
@@ -361,7 +422,7 @@ export class TodoistApi implements Todoist {
       ? remoteMeal(value)
       : await this.get(input.taskId, input.projectId);
     if (!updated) throw new TodoistError("Moved task is not readable yet");
-    this.invalidate(input.projectId);
+    this.acknowledge(updated);
     return updated;
   }
   async delete(taskId: string, projectId: string, requestId: string) {
@@ -376,7 +437,7 @@ export class TodoistApi implements Todoist {
       requestId,
       true,
     );
-    this.invalidate(projectId);
+    this.acknowledge(null, taskId);
   }
   async complete(taskId: string, projectId: string, requestId: string) {
     const task = await this.get(taskId, projectId);
@@ -388,7 +449,10 @@ export class TodoistApi implements Todoist {
         "Cannot confirm completion: meal is missing from Meals",
         true,
       );
-    if (task.completed) return;
+    if (task.completed) {
+      this.acknowledge(task);
+      return;
+    }
     // Unlike DELETE, a 404 on close is not an acknowledgement: the preflight
     // GET proved the task exists, so a 404 here is an inconsistent result that
     // must stay pending rather than be reported as saved.
@@ -398,6 +462,6 @@ export class TodoistApi implements Todoist {
       undefined,
       requestId,
     );
-    this.invalidate(projectId);
+    this.acknowledge({ ...task, completed: true });
   }
 }
