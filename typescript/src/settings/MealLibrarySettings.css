@@ -5,31 +5,46 @@
 .folio-library .folio-library-add { flex-shrink: 0; min-height: 44px; padding: 11px 13px; background: var(--pink, #f5d9df); color: inherit; border: 1px solid currentColor; border-radius: 5px; box-shadow: 3px 3px 0 currentColor; font: inherit; font-size: 14px; font-weight: 700; white-space: nowrap; cursor: pointer; }
 .folio-library .folio-library-add:hover:enabled { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 currentColor; }
 .folio-library .folio-library-add:active:enabled { transform: translate(3px, 3px); box-shadow: none; }
-.folio-library .folio-library-row { display: flex; align-items: center; gap: 20px; padding: 27px 0; border-bottom: 1px dashed var(--line, #55344933); }
-.folio-library .folio-library-name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 23px; font-weight: 800; letter-spacing: -.5px; }
-.folio-library .folio-library-remove { display: grid; place-items: center; flex: 0 0 44px; width: 44px; height: 44px; padding: 10px; border: 1px solid currentColor; border-radius: 5px; box-shadow: 1px 1px 0 currentColor; background: transparent; color: inherit; cursor: pointer; }
-.folio-library .folio-library-remove svg { width: 22px; height: 22px; }
+.folio-library .folio-library-row { position: relative; display: block; padding: 0; overflow: hidden; border-bottom: 1px dashed var(--line, #55344933); }
+.folio-library .folio-library-surface { position: relative; z-index: 1; min-height: 64px; display: flex; align-items: center; padding: 8px 0; background: var(--paper, #fff4e6); touch-action: pan-y; transition: transform .18s ease-out; }
+.folio-library .folio-library-name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 19px; font-weight: 800; letter-spacing: -.5px; line-height: 1.25; }
+.folio-library .folio-library-swipe-action { position: absolute; z-index: 0; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; min-width: 44px; min-height: 44px; border: 0; border-radius: 5px; box-shadow: none; padding: 10px; color: white; display: grid; place-items: center; cursor: pointer; }
+.folio-library .folio-library-edit { left: 0; background: #2867ae; }
+.folio-library .folio-library-remove { right: 0; background: #b42335; }
+.folio-library .folio-library-swipe-action svg { width: 24px; height: 24px; }
 .folio-library button:disabled { opacity: .55; cursor: default; }
 .folio-library button:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; }
 .folio-library .folio-library-feedback { font-size: 14px; margin-top: 12px; overflow-wrap: anywhere; }
 .folio-library .folio-library-feedback:empty { display: none; }
 .folio-library .folio-library-spinner { width: 16px; height: 16px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: folio-library-spin .8s linear infinite; }
 @keyframes folio-library-spin { to { transform: rotate(360deg); } }
-@media (max-width: 700px) { .folio-library .folio-library-tools { gap: 10px; } .folio-library .folio-library-tools input { font-size: 16px; } .folio-library .folio-library-add { font-size: 13px; } .folio-library .folio-library-name { font-size: 21px; } }
-@media (prefers-reduced-motion: reduce) { .folio-library .folio-library-spinner { animation: none !important; } }
-.folio-library .folio-library-row { position: relative; display: block; padding: 0; overflow: hidden; }
-.folio-library .folio-library-surface { position: relative; min-height: 64px; display: flex; align-items: center; padding: 8px 0; background: var(--paper, #fff4e6); touch-action: pan-y; transition: transform .18s ease-out; }
-.folio-library .folio-library-name { font-size: 19px; line-height: 1.25; }
-.folio-library .folio-library-swipe-action { position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; min-width: 44px; min-height: 44px; border: 0; border-radius: 5px; box-shadow: none; padding: 10px; color: white; display: grid; place-items: center; cursor: pointer; }
-.folio-library .folio-library-edit { left: 0; background: #2867ae; }
-.folio-library .folio-library-remove { right: 0; background: #b42335; }
-.folio-library .folio-library-swipe-action svg { width: 24px; height: 24px; }
-.folio-library .folio-library-row:is(:focus-visible, :has(button:focus-visible)):not(.is-editing) .folio-library-surface { padding-left: 52px; padding-right: 52px; background: transparent; pointer-events: none; transform: none !important; }
-.folio-library .folio-library-row:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
 .folio-library .is-editing .folio-library-swipe-action { visibility: hidden; }
 .folio-library .folio-library-rename { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; }
 .folio-library .folio-library-rename input { min-width: 0; flex: 1; width: 100%; background: transparent; color: inherit; border: 1px solid currentColor; padding: 8px; font: inherit; }
 .folio-library .folio-library-rename button { color: inherit; background: var(--pink); border: 1px solid currentColor; border-radius: 4px; min-height: 44px; padding: 8px; }
 .folio-library .folio-library-rename [role=alert] { width: 100%; font-size: 14px; }
-@media (hover: hover) { .folio-library .folio-library-row:hover:not(.is-editing) .folio-library-surface { padding-left: 52px; padding-right: 52px; background: transparent; pointer-events: none; transform: none !important; } }
-@media (prefers-reduced-motion: reduce) { .folio-library .folio-library-surface { transition: none !important; } }
+.folio-library .folio-library-row:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+
+/* Touch-first devices: swiping reveals the full-size edit/delete actions. */
+@media (hover: none), (pointer: coarse) {
+  .folio-library .folio-library-row:is(:focus-visible, :has(button:focus-visible)):not(.is-editing) .folio-library-surface { padding-left: 52px; padding-right: 52px; background: transparent; pointer-events: none; transform: none !important; }
+}
+@media (hover: hover) and (pointer: coarse) {
+  .folio-library .folio-library-row:hover:not(.is-editing) .folio-library-surface { padding-left: 52px; padding-right: 52px; background: transparent; pointer-events: none; transform: none !important; }
+}
+
+/* Fine pointer desktops: quiet, compact icons on the right that blend into the row. */
+@media (hover: hover) and (pointer: fine) {
+  .folio-library .folio-library-row { display: flex; align-items: center; }
+  .folio-library .folio-library-surface { flex: 1 1 auto; min-width: 0; transform: none !important; transition: none; }
+  .folio-library .folio-library-swipe-action { position: static; z-index: auto; top: auto; transform: none; width: 40px; height: 40px; min-width: 40px; min-height: 40px; padding: 9px; border-radius: 6px; color: inherit; background: transparent; opacity: .5; transition: opacity .15s ease, background-color .15s ease; }
+  .folio-library .folio-library-swipe-action svg { width: 20px; height: 20px; }
+  .folio-library .folio-library-edit { order: 1; }
+  .folio-library .folio-library-remove { order: 2; }
+  .folio-library .folio-library-swipe-action:hover:enabled,
+  .folio-library .folio-library-swipe-action:focus-visible { opacity: 1; background: color-mix(in srgb, currentColor 10%, transparent); }
+  .folio-library .folio-library-swipe-action:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+}
+
+@media (max-width: 700px) { .folio-library .folio-library-tools { gap: 10px; } .folio-library .folio-library-tools input { font-size: 16px; } .folio-library .folio-library-add { font-size: 13px; } .folio-library .folio-library-name { font-size: 21px; } }
+@media (prefers-reduced-motion: reduce) { .folio-library .folio-library-spinner { animation: none !important; } .folio-library .folio-library-surface { transition: none !important; } }
