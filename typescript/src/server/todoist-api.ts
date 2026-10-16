@@ -367,4 +367,25 @@ export class TodoistApi implements Todoist {
       true,
     );
   }
+  async complete(taskId: string, projectId: string, requestId: string) {
+    const task = await this.get(taskId, projectId);
+    // An already completed task is the idempotent result of a prior attempt
+    // whose acknowledgement was lost. A missing task does NOT prove completion,
+    // so fail closed rather than reporting a false success.
+    if (!task)
+      throw new TodoistError(
+        "Cannot confirm completion: meal is missing from Meals",
+        true,
+      );
+    if (task.completed) return;
+    // Unlike DELETE, a 404 on close is not an acknowledgement: the preflight
+    // GET proved the task exists, so a 404 here is an inconsistent result that
+    // must stay pending rather than be reported as saved.
+    await this.request(
+      `/tasks/${encodeURIComponent(taskId)}/close`,
+      "POST",
+      undefined,
+      requestId,
+    );
+  }
 }

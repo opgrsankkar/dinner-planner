@@ -75,4 +75,19 @@ export class LocalPlan implements Todoist {
       tx.localReceiptInsert({ id: id(requestId), body: "null" });
     }));
   }
+  // Local completion is idempotent: an already completed meal is left as-is so a
+  // retry after a lost acknowledgement cannot change anything or duplicate it.
+  async complete(taskId: string, owner: string, _requestId: string) {
+    checkProject(owner);
+    await this.store.write(() => this.store.db.transaction(tx => {
+      const row = tx.localMealGet(id(taskId));
+      if (!row) return;
+      const task = JSON.parse(row.body) as RemoteMeal;
+      checkProject(task.projectId);
+      if (task.completed) return;
+      tx.localMealUpdate(row.id, {
+        body: JSON.stringify({ ...task, completed: true }),
+      });
+    }));
+  }
 }

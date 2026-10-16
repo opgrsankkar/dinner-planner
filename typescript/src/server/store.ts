@@ -1,4 +1,5 @@
 import { sortSlotsByTime } from "../slot-order";
+import { isPastSlot } from "../past-slot";
 import { Persistence } from "./persistence";
 import { randomUUID } from "node:crypto";
 import type {
@@ -10,6 +11,7 @@ import type {
   Slot,
 } from "../types";
 import type { Todoist } from "./todoist";
+import { completionRequestId } from "./todoist";
 import { TodoistError } from "./todoist-api";
 export const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -111,6 +113,8 @@ export class Store {
           time: slot.time,
           date: input.date,
           projectId,
+          // Decide once, at submission, whether this meal is already past.
+          complete: isPastSlot(input.date, slot.time) || undefined,
         };
         return tx.outboxInsert({
           id: input.requestId,
@@ -197,6 +201,7 @@ export class Store {
           deleting: payload.kind === "delete",
           requestId: op.id,
           ...payload,
+          completed: payload.complete === true,
           state: "pending",
           error: op.error,
           confirmedAt: 0,
@@ -237,6 +242,7 @@ export class Store {
           ...payload,
           id: op.remoteId,
           requestId: op.id,
+          completed: payload.complete === true,
           state: "saved",
           error: "",
           confirmedAt: Number(op.confirmedAt),
@@ -696,6 +702,16 @@ export class Worker {
         throw new TodoistError(
           "Todoist acknowledgement did not match placement",
           true,
+        );
+      // A meal submitted for a past date/time is completed right after it is
+      // created. The remote ID is already persisted above and completion is
+      // idempotent, so a failed or lost completion acknowledgement retries
+      // without ever creating a second task.
+      if (payload.complete && !task.completed)
+        await this.todoist.complete(
+          task.id,
+          project.id,
+          completionRequestId(action.id),
         );
       await this.store.write(() =>
         this.store.db.outboxUpdate(action.id, {
