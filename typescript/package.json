@@ -18,6 +18,7 @@
     "smoke:issue-66": "tsx scripts/issue-66-browser.ts",
     "smoke:issue-66-webkit": "tsx scripts/issue-66-webkit-browser.ts",
     "smoke:issue-67": "tsx scripts/issue-67-browser.ts",
+    "smoke:issue-74": "tsx scripts/issue-74-browser.ts",
     "check:runtime": "node --import tsx scripts/runtime-check.ts",
     "demo": "mkdir -p .local && npm run db:init && npm run dev",
     "start": "node scripts/serve.mjs",
