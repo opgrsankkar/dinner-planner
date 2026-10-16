@@ -6,6 +6,7 @@ import type { Board, Meal, Card, Slot } from "../types";
 import { defaultPlanPlacement } from "../plan-default";
 import { orderLibrary } from "../library-order";
 import { requestId as newRequestId } from "../request-id";
+import { libraryDragPreview, sameLibraryDragPreview, type DragPreview } from "../drag-preview";
 export const Route = createFileRoute("/")({ component: Planner });
 type Intent = {
   requestId: string;
@@ -70,6 +71,8 @@ function Icon({ name, spin = false }: { name: string; spin?: boolean }) {
 export function Planner() {
   const settingsPage = useLocation().pathname === "/settings";
   const [moving, setMoving] = useState<Card | null>(null);
+  const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
+  const draggedLibraryMeal = useRef<Meal | null>(null);
   const [board, setBoard] = useState<Board | null>(null);
   const boardRef = useRef<Board | null>(board);
   boardRef.current = board;
@@ -209,6 +212,8 @@ export function Planner() {
     const cancelTouchDrag = () => clearTouchDrag();
     const finishPlannedDrag = () => {
       clearTouchDrag();
+      draggedLibraryMeal.current = null;
+      setDragPreview(null);
     };
     const cancelPlannedDrag = (event: KeyboardEvent) => {
       if (event.key === "Escape") finishPlannedDrag();
@@ -738,7 +743,23 @@ export function Planner() {
                 Other meals.
               </p>
             )}
-            <div className="grid-scroll">
+            <div
+              className="grid-scroll"
+              onDragOver={(e) => {
+                if (
+                  e.dataTransfer.types.includes("application/x-meal-library") &&
+                  !(e.target as Element).closest(".meal-cell")
+                )
+                  setDragPreview(null);
+              }}
+              onDragLeave={(e) => {
+                if (
+                  e.currentTarget.contains(e.relatedTarget as Node | null)
+                )
+                  return;
+                setDragPreview(null);
+              }}
+            >
               <table className="meal-grid" data-slot-count={board.slots.length}>
                 <caption className="visually-hidden">Weekly meal plan</caption>
                 <thead>
@@ -779,23 +800,34 @@ export function Planner() {
                       </th>
                       {days.map((d) => (
                         <td
-                          className="meal-cell"
+                          className={`meal-cell${dragPreview && dragPreview.date === d.iso && dragPreview.slotId === slot.id ? " drag-drop-hover" : ""}`}
                           data-date={d.iso}
                           data-slot-id={slot.id}
                           key={d.iso}
                           onDragOver={(e) => {
-                            if (
-                              e.dataTransfer.types.includes(
-                                "application/x-meal-library",
-                              ) ||
-                              e.dataTransfer.types.includes(
-                                "application/x-planned-meal",
-                              )
-                            )
-                              e.preventDefault();
+                            const library = e.dataTransfer.types.includes(
+                              "application/x-meal-library",
+                            );
+                            const planned = e.dataTransfer.types.includes(
+                              "application/x-planned-meal",
+                            );
+                            if (!library && !planned) return;
+                            e.preventDefault();
+                            if (library)
+                              setDragPreview((previous) => {
+                                const next = libraryDragPreview(
+                                  draggedLibraryMeal.current,
+                                  d.iso,
+                                  slot.id,
+                                );
+                                return sameLibraryDragPreview(previous, next)
+                                  ? previous
+                                  : next;
+                              });
                           }}
                           onDrop={(e) => {
                             e.preventDefault();
+                            setDragPreview(null);
                             const meal = board.library.find(
                               (m) =>
                                 m.id ===
@@ -951,6 +983,18 @@ export function Planner() {
                                   )}
                                 </div>
                               ))}
+                            {dragPreview &&
+                              dragPreview.date === d.iso &&
+                              dragPreview.slotId === slot.id && (
+                                <div
+                                  className="meal-chip meal-chip-preview"
+                                  aria-hidden="true"
+                                >
+                                  <span className="meal-chip-name">
+                                    {dragPreview.name}
+                                  </span>
+                                </div>
+                              )}
                           </div>
                         </td>
                       ))}
@@ -1057,11 +1101,16 @@ export function Planner() {
                     onKeyDown={() => { libraryDragged.current = false; }}
                     onDragStart={(e) => {
                       libraryDragged.current = true;
+                      draggedLibraryMeal.current = meal;
                       e.currentTarget.classList.add("is-dragging");
                       e.dataTransfer.effectAllowed = "copy";
                       e.dataTransfer.setData("application/x-meal-library", meal.id);
                     }}
-                    onDragEnd={(e) => { e.currentTarget.classList.remove("is-dragging"); }}
+                    onDragEnd={(e) => {
+                      e.currentTarget.classList.remove("is-dragging");
+                      draggedLibraryMeal.current = null;
+                      setDragPreview(null);
+                    }}
                     onClick={(e) => {
                       if (libraryDragged.current) return;
                       openPlan(meal, e.currentTarget);

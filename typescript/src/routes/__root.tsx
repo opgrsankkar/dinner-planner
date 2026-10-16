@@ -11,7 +11,7 @@ export const Route = createRootRoute({
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Meal Planner" },
     ],
-    links: [{ rel: "stylesheet", href: "/static/app.css" }],
+    links: [{ rel: "stylesheet", href: "/static/app.css?v=issue76" }],
   }),
   component: () => (
     <html lang="en">
