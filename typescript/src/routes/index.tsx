@@ -1,5 +1,5 @@
 import { createFileRoute, useLocation } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { SettingsPage } from "../settings";
 import { WeekPicker } from "../WeekPicker";
 import { AddMealDialog, type CellTarget } from "../AddMealDialog";
@@ -168,7 +168,9 @@ export function Planner() {
         const box = grid.getBoundingClientRect();
         const left = Math.max(box.left, 0);
         const right = Math.min(box.right, innerWidth);
-        if (drag.y >= box.top && drag.y <= box.bottom) {
+        // Only while the finger is over the board: on wide screens the library
+        // sits beside it, and starting a drag there must not scroll the days.
+        if (drag.y >= box.top && drag.y <= box.bottom && drag.x >= left && drag.x <= right) {
           const before = grid.scrollLeft;
           if (drag.x < left + zone) grid.scrollLeft -= speed(drag.x - left);
           else if (drag.x > right - zone) grid.scrollLeft += speed(right - drag.x);
@@ -848,7 +850,12 @@ export function Planner() {
                 setDragPreview(null);
               }}
             >
-              <table className="meal-grid" data-slot-count={board.slots.length}>
+              <table
+                className="meal-grid"
+                data-slot-count={board.slots.length}
+                // Narrow screens share the visible height between these rows.
+                style={{ "--slot-rows": board.slots.length + (board.cards.some((card) => !card.slotId) ? 1 : 0) } as CSSProperties}
+              >
                 <caption className="visually-hidden">Weekly meal plan</caption>
                 <thead>
                   <tr>
@@ -1229,6 +1236,7 @@ export function Planner() {
         focusSearch={!coarsePointer}
         onPick={(meal, picked) => void place(meal, picked.date, picked.slot)}
         onCreate={createLibraryMeal}
+        onShuffle={() => post("/api/library/shuffle", {}).then(refresh)}
         onClose={() => {
           setCellTarget(null);
           dialogTrigger.current?.focus();

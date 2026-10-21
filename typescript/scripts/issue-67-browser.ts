@@ -66,13 +66,23 @@ try {
       await page.waitForFunction((value) => document.documentElement.dataset.theme === value, theme);
 
       await page.getByRole("button", { name: "Next week", exact: true }).click();
-      const meal = page.locator(".library-chip").first();
-      const name = (await meal.innerText()).replace("⠿", "").trim();
-      if (mobile) await meal.tap();
-      else await meal.click();
-      await page.getByRole("dialog", { name: `Plan ${name}` }).waitFor();
-      assert.equal(await page.getByRole("button", { name: "Delete meal", exact: true }).count(), 0);
-      await page.getByRole("button", { name: "Plan meal", exact: true }).click();
+      let name: string;
+      if (mobile) {
+        // Phones plan from a cell's "+" (the library panel is hidden).
+        await page.locator(".cell-add-button").first().tap();
+        const add = page.getByRole("dialog", { name: /^Add to / });
+        const option = add.locator(".add-meal-options button").first();
+        name = (await option.innerText()).trim();
+        assert.equal(await add.getByRole("button", { name: "Delete meal", exact: true }).count(), 0);
+        await option.tap();
+      } else {
+        const meal = page.locator(".library-chip").first();
+        name = (await meal.innerText()).replace("⠿", "").trim();
+        await meal.click();
+        await page.getByRole("dialog", { name: `Plan ${name}` }).waitFor();
+        assert.equal(await page.getByRole("button", { name: "Delete meal", exact: true }).count(), 0);
+        await page.getByRole("button", { name: "Plan meal", exact: true }).click();
+      }
       await page.getByRole("status", { name: "Meal saved", exact: true }).waitFor();
       const planned = page.getByRole("button", { name: `Move or delete ${name}`, exact: true }).first();
       if (mobile) await planned.tap();

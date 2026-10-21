@@ -195,9 +195,9 @@ try {
     });
     const page = await context.newPage();
     await login(page);
-    const name = (await page.locator(".library-chip-name").first().innerText()).trim();
-    await page.locator(".library-chip").first().tap();
-    await page.getByRole("dialog", { name: `Plan ${name}` }).waitFor();
+    // Phones plan from a cell's "+" (the library panel is hidden).
+    await page.locator(".cell-add-button").first().tap();
+    await page.getByRole("dialog", { name: /^Add to / }).waitFor();
     assert.equal(await page.locator(".meal-chip-preview").count(), 0, "touch interaction creates no drag ghost");
     await page.screenshot({ path: join(screenshots, "mobile-touch-plan-dialog.png"), fullPage: true });
     await page.getByRole("button", { name: "Cancel", exact: true }).click();

@@ -68,30 +68,54 @@ try {
       await page.waitForFunction((value) => document.documentElement.dataset.theme === value, theme);
       const tag = `${mobile ? "mobile" : "desktop"}-${theme}`;
 
-      const initial = await plannerNames(page);
-      assert.ok(initial.length >= 3, `${tag}: seeded library is visible`);
-      const initialFirst = initial[0];
-
       const name = `Issue 75 meal ${crypto.randomUUID().slice(0, 8)}`;
-      await page.getByRole("searchbox").fill(name);
-      await page.getByRole("button", { name: "Add meal", exact: true }).click();
-      await page.getByText(`Added ${name} to the meal library.`).waitFor();
-      await page.locator(".library-chip-name").filter({ hasText: name }).waitFor();
+      let initialFirst: string;
+      if (mobile) {
+        // Phones have no side panel; the cell "+" dialog lists the library instead.
+        await page.getByRole("button", { name: "Next week", exact: true }).click();
+        const add = page.getByRole("dialog", { name: /^Add to / });
+        const options = add.locator(".add-meal-options button:not(.add-meal-create)");
+        await page.locator(".cell-add-button").first().tap();
+        const initial = await options.allInnerTexts();
+        assert.ok(initial.length >= 3, `${tag}: seeded library is listed`);
+        initialFirst = initial[0];
+        await page.locator("#add-meal-search").fill(name);
+        await add.locator(".add-meal-create").tap();
+        await page.getByRole("status", { name: "Meal saved", exact: true }).waitFor();
+        await page.locator(".meal-chip").filter({ hasText: name }).waitFor();
+        await page.locator(".cell-add-button").nth(1).tap();
+        await add.waitFor();
+        const ordered = await options.allInnerTexts();
+        assert.equal(ordered[0], name, `${tag}: newly added meal appears at the top of the + list`);
+        assert.equal(ordered.at(-1), initial.at(-1), `${tag}: existing meals keep their relative order`);
+        assert.equal(ordered.length, initial.length + 1, `${tag}: add appends exactly one meal`);
+        await page.screenshot({ path: join(screenshots, `${tag}-new-meal-top.png`), fullPage: true });
+        await page.keyboard.press("Escape");
+      } else {
+        const initial = await plannerNames(page);
+        assert.ok(initial.length >= 3, `${tag}: seeded library is visible`);
+        initialFirst = initial[0];
 
-      const ordered = await plannerNames(page);
-      assert.equal(ordered[0], name, `${tag}: newly added meal appears at the top of the planner side panel`);
-      assert.equal(ordered.at(-1), initial.at(-1), `${tag}: existing meals keep their relative order`);
-      assert.equal(ordered.length, initial.length + 1, `${tag}: add appends exactly one meal`);
-      await page.screenshot({ path: join(screenshots, `${tag}-new-meal-top.png`), fullPage: true });
+        await page.getByRole("searchbox").fill(name);
+        await page.getByRole("button", { name: "Add meal", exact: true }).click();
+        await page.getByText(`Added ${name} to the meal library.`).waitFor();
+        await page.locator(".library-chip-name").filter({ hasText: name }).waitFor();
 
-      // The new top meal must be immediately usable without scrolling or searching.
-      await page.getByRole("button", { name: `Plan ${name}`, exact: true }).click();
-      await page.getByRole("dialog", { name: `Plan ${name}` }).waitFor();
-      await page.getByLabel("Day", { exact: true }).selectOption({ index: 1 });
-      await page.getByLabel("Meal slot", { exact: true }).selectOption({ label: "Lunch" });
-      await page.getByRole("button", { name: "Plan meal", exact: true }).click();
-      await page.getByRole("status", { name: "Meal saved", exact: true }).waitFor();
-      await page.locator(".meal-chip").filter({ hasText: name }).waitFor();
+        const ordered = await plannerNames(page);
+        assert.equal(ordered[0], name, `${tag}: newly added meal appears at the top of the planner side panel`);
+        assert.equal(ordered.at(-1), initial.at(-1), `${tag}: existing meals keep their relative order`);
+        assert.equal(ordered.length, initial.length + 1, `${tag}: add appends exactly one meal`);
+        await page.screenshot({ path: join(screenshots, `${tag}-new-meal-top.png`), fullPage: true });
+
+        // The new top meal must be immediately usable without scrolling or searching.
+        await page.getByRole("button", { name: `Plan ${name}`, exact: true }).click();
+        await page.getByRole("dialog", { name: `Plan ${name}` }).waitFor();
+        await page.getByLabel("Day", { exact: true }).selectOption({ index: 1 });
+        await page.getByLabel("Meal slot", { exact: true }).selectOption({ label: "Lunch" });
+        await page.getByRole("button", { name: "Plan meal", exact: true }).click();
+        await page.getByRole("status", { name: "Meal saved", exact: true }).waitFor();
+        await page.locator(".meal-chip").filter({ hasText: name }).waitFor();
+      }
 
       // Settings keeps its own server-driven order; the side-panel float must not leak.
       await page.getByRole("link", { name: "Settings", exact: true }).click();

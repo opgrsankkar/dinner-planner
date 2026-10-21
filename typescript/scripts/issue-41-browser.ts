@@ -153,8 +153,9 @@ try {
   await mobile.emulateMedia({ colorScheme: "dark" });
   await mobile.waitForFunction(() => document.documentElement.dataset.theme === "dark");
   await mobile.screenshot({ path: join(screenshots, "after-mobile-dark.png"), fullPage: true });
-  // Mobile retains its non-drag planning alternative and keeps the affordance hidden.
-  await mobile.getByRole("button", { name: `Plan ${newName}`, exact: true }).waitFor();
+  // Mobile plans from each cell's "+" (the library panel is hidden) and keeps the trash hidden.
+  await mobile.locator(".cell-add-button").first().waitFor();
+  await mobile.locator(".library-list").waitFor({ state: "hidden" });
   assert.equal(await mobile.locator(".trash-drop-target").evaluate((node) => getComputedStyle(node).opacity), "0");
 
   console.log(`Issue 41 production browser checks passed; screenshots saved in ${screenshots}`);

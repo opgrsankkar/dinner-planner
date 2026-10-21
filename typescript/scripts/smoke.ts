@@ -252,7 +252,8 @@ try {
   await page.getByRole("searchbox").fill(longName);
   await page.getByRole("button", { name: "Add meal", exact: true }).click();
   await page.getByRole("searchbox").fill("");
-  for (const width of [1440, 390]) {
+  // The library panel only exists on wide screens; phones use the cell "+".
+  for (const width of [1440, 1000]) {
     await page.setViewportSize({ width, height: 900 });
     await page.locator(".library-chip-name").filter({ hasText: longName }).waitFor();
     await page.waitForTimeout(500);
@@ -271,6 +272,8 @@ try {
       });
     }), "Long names stay within chips without overlapping rows");
   }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator(".library-list").waitFor({ state: "hidden" });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole("button", { name: "Next week", exact: true }).click();
   await page.getByRole("button", { name: "Next week", exact: true }).click();
@@ -463,11 +466,15 @@ try {
   await mobilePage
     .getByRole("button", { name: "Next week", exact: true })
     .click();
+  // Phones plan from a cell's "+" (the library panel is hidden).
   await mobilePage
-    .getByRole("button", { name: "Plan Dal & rice", exact: true })
+    .locator("tbody tr:nth-child(2) .meal-cell")
+    .first()
+    .locator(".cell-add-button")
     .click();
   await mobilePage
-    .getByRole("button", { name: "Plan meal", exact: true })
+    .getByRole("dialog", { name: /^Add to / })
+    .getByRole("button", { name: "Dal & rice", exact: true })
     .click();
   await mobilePage
     .getByRole("button", { name: "Saving meal", exact: true })

@@ -331,3 +331,39 @@ html[data-theme=dark] .add-meal-error{color:#ff8c9c}
 /* Phones: pin to the top of the visible area so the keyboard never covers the list or Cancel. */
 @media(max-width:700px){.add-meal-dialog{width:calc(100vw - 20px);margin:calc(var(--visible-top,0px) + 10px) auto auto;max-height:calc(var(--visible-height,100dvh) - 20px);padding:16px}.add-meal-dialog h2{font-size:19px}}
 .meal-chip.is-complete[role=button]{cursor:grab}
+
+.add-meal-search-row{display:flex;gap:8px}
+.add-meal-dialog .add-meal-search-row #add-meal-search{flex:1;min-width:0}
+.add-meal-shuffle{flex:none;display:grid;place-items:center;width:44px;height:44px;padding:0;border:1px solid var(--ink);border-radius:5px;background:var(--surface-2);color:var(--ink);cursor:pointer}
+.add-meal-shuffle svg{width:20px;height:20px}
+.add-meal-shuffle:disabled{opacity:.55;cursor:wait}
+/* Narrow screens: the week fills the visible screen without vertical scrolling.
+   The cell "+" replaces the library panel; only its trash target stays, pinned
+   to the bottom of the screen while dragging. */
+@media(max-width:900px){
+.topbar:not(.settings-topbar){display:flex;align-items:center;justify-content:space-between;gap:6px;height:56px;min-height:0;padding:0 8px}
+.topbar:not(.settings-topbar) .week-nav{gap:4px;min-width:0;padding:0}
+.topbar:not(.settings-topbar) :is(.week-nav,.top-actions) .icon-button{width:34px;height:34px}
+.topbar:not(.settings-topbar) .week-title{min-width:0;font-size:15px}
+.topbar:not(.settings-topbar) .top-actions{gap:6px}
+.topbar:not(.settings-topbar) .this-week{padding:6px 9px;font-size:13px;white-space:nowrap}
+.app-layout{margin:0 auto;padding:4px 6px 0;gap:0}
+.planner-panel{padding:0}
+.library-panel{display:contents}
+.library-panel>:not(.trash-drop-target){display:none}
+.trash-drop-target{position:fixed;z-index:30;top:calc(100dvh - 72px - env(safe-area-inset-bottom));width:96px;height:96px;border-radius:22px}
+.trash-drop-target>.ui-icon{width:44px;height:44px}
+.grid-corner,.day-header,.day-header-content{height:46px}
+.day-header-content{gap:0}
+.day-date{font-size:11px}
+.day-name{font-size:15px}
+.day-count{top:3px;right:3px;min-width:18px;height:18px;padding:0 4px;font-size:10px}
+/* 56px top bar + 4px gap + 49px day headers (with borders) + 4px slack. */
+.meal-grid{--row:max(84px,calc((100svh - 113px) / var(--slot-rows,3)))}
+.meal-grid tbody tr,.meal-cell{height:var(--row)}
+.meal-cell-content{min-height:calc(var(--row) - 12px)}
+/* Two two-line meals plus the "+" fit a slot row at 12 mini height. */
+.meal-grid .meal-chip{padding-block:5px}
+.meal-grid .meal-chip-name{line-height:1.25}
+.cell-add-button{flex-basis:20px;min-height:20px}
+}
