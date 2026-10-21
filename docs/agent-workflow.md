@@ -18,20 +18,20 @@ This is a single-user pet project for experimenting, not a production-hardening 
 
 ## Team and execution
 
-- Hermes/Sol orchestrates architecture, bounded tasks, independent verification, review fixes, merge, and deployment.
-- Codex CLI agents actually write the code using exact model `gpt-6.1-sol` and reasoning effort `low`. Use a fresh concise conversation per coherent milestone, reusing it for that milestone's fixes. One active writer per worktree.
-- Gemini/Antigravity review is waived by the user. Do not launch or wait for Gemini reviews for this migration. Hermes independently inspects diffs and executes proportionate tests/browser verification; reviewer approval is not a merge/deployment gate.
-- Confirm actual model/effort and working harness before delegation. If auth, sandbox, or model invocation fails, fix the concrete blocker or report it; do not silently implement through a different model/harness and attribute it to Codex.
+- The agent working on a task owns it end to end: it writes the code, verifies it, publishes the PR, merges, and deploys. There is no designated implementer model or harness; the user names a specific model, agent, or delegation when they want one.
+- Do not stop at review. A review, audit, or investigation that finds worthwhile fixes implements them, verifies them, merges, and deploys, then reports the outcome. Stop at a report or other boundary only when the user explicitly asks for that.
+- One active writer per worktree. If you do delegate, confirm the actual model and working harness first, and report delegation that failed instead of attributing work to a model that did not run.
+- Gemini/Antigravity review is waived by the user. Do not launch or wait for Gemini reviews. Inspect your own diff and run proportionate tests and browser checks; reviewer approval is not a merge/deployment gate.
 - Use bounded tasks/timeouts and completion notifications. No endless agent polling, recursive agent spawning, history-heavy unrelated conversations, or open-ended improvement loops. Ask before escalating model effort or incurring materially greater cost beyond the agreed work.
 
 ## Restart and development sequence
 
 1. Inspect live GitHub and local worktrees before cleanup. The abandoned Luna migration was a stacked set of PRs #5 through #11 and `migration/*` branches, last observed at `migration/todoist-write-client`; re-read state rather than assuming these observations remain current.
 2. Close abandoned migration PRs and remove their migration branches under the user's authorization. Preserve unrelated branches, merged work, deployment data, and the currently running app. Preserve a local git bundle or equivalent rollback record of abandoned commits before deleting refs; do not reuse rejected code as the new branch base.
-3. Create one fresh migration branch from updated `master` in a separate development checkout. Keep project-local `AGENTS.md` aligned with this reference so Codex and reviewers receive the same rules.
+3. Create one fresh migration branch from updated `master` in a separate development checkout. Keep project-local `AGENTS.md` aligned with this reference so every agent receives the same rules.
 4. Prefer coherent commits and one integration PR, not another long unmerged tower of dependent PRs. Build a runnable vertical slice early: login, weekly board, place meal, immediate feedback, durable outbox, and background sync acknowledgement. Use fake Todoist with delays/errors during development.
 5. Complete move/delete/retry/restart recovery, settings/library/slot behavior, history/reconciliation, and remaining parity. Keep interfaces and modules simple; avoid speculative abstractions and generic frameworks.
-6. Hermes inspects meaningful milestones, directs necessary fixes, and independently executes verification. Continue implementation, merge, and deployment without Gemini review.
+6. Inspect meaningful milestones yourself, fix what you find, and execute verification. Continue implementation, merge, and deployment without Gemini review or waiting for the user.
 
 ## Verification and deployment
 
