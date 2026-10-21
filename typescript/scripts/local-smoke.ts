@@ -48,7 +48,15 @@ async function request(path: string, body?: unknown) {
   assert.ok(response.ok, `${path}: ${response.status} ${await response.clone().text()}`);
   return response;
 }
-async function board(): Promise<Board> { return (await request("/api/board?week=2026-10-12")).json(); }
+// Next week's Monday and Tuesday: every slot there is in the future, so new
+// placements are never auto-completed as past meals.
+const day = (offset: number) => {
+  const date = new Date(`${new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date())}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + offset - ((date.getUTCDay() + 6) % 7) + 7);
+  return date.toISOString().slice(0, 10);
+};
+const week = day(0);
+async function board(): Promise<Board> { return (await request(`/api/board?week=${week}`)).json(); }
 async function saved(requestId: string) {
   for (let attempt = 0; attempt < 50; attempt++) {
     const current = await board();
@@ -68,7 +76,7 @@ try {
   assert.equal(initial.integrationError, "");
   assert.equal(initial.library.length, 0);
   const meal = await (await request("/api/library", { name: "Standalone dinner" })).json();
-  const placement = { requestId: randomUUID(), mealId: meal.id, slotId: initial.slots[0].id, date: "2026-10-12" };
+  const placement = { requestId: randomUUID(), mealId: meal.id, slotId: initial.slots[0].id, date: week };
   await request("/api/plan", placement);
   const placed = await saved(placement.requestId);
   await request("/api/plan", placement);
@@ -78,7 +86,7 @@ try {
   const restored = await board();
   assert.equal(restored.cards[0].id, placed.cards[0].id);
   assert.equal(restored.library[0].id, meal.id);
-  const move = { requestId: randomUUID(), taskId: restored.cards[0].id, kind: "move", slotId: initial.slots[1].id, date: "2026-10-13" };
+  const move = { requestId: randomUUID(), taskId: restored.cards[0].id, kind: "move", slotId: initial.slots[1].id, date: day(1) };
   await request("/api/change", move);
   assert.equal((await saved(move.requestId)).cards[0].date, move.date);
   const deletion = { requestId: randomUUID(), taskId: restored.cards[0].id, kind: "delete" };

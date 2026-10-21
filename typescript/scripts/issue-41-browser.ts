@@ -60,6 +60,8 @@ try {
   });
   const desktop = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   await login(desktop);
+  // Use next week: meals dropped on past slots are completed and cannot be dragged again.
+  await desktop.getByRole("button", { name: "Next week", exact: true }).click();
 
   const libraryMeal = desktop.locator(".library-chip").first();
   const plannedName = (await libraryMeal.innerText()).replace("⠿", "").trim();

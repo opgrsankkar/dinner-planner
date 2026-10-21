@@ -10,6 +10,13 @@ const directory = await mkdtemp(join(tmpdir(), "planner-issue-66-webkit-"));
 const screenshots = process.env.ISSUE66_WEBKIT_SCREENSHOT_DIR ?? join(tmpdir(), "dinner-planner-issue-66-webkit");
 await mkdir(screenshots, { recursive: true });
 const password = `synthetic-${crypto.randomUUID()}`;
+// Pin the browser to next week's Wednesday afternoon. The server decides past
+// slots from the real clock, so a fixed calendar date would eventually be past.
+const pinnedNow = (() => {
+  const date = new Date(`${new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date())}T12:30:00Z`);
+  date.setUTCDate(date.getUTCDate() + 9 - ((date.getUTCDay() + 6) % 7));
+  return date;
+})();
 const env = {
   ...process.env,
   TODOIST_MODE: "fake",
@@ -52,7 +59,7 @@ try {
   browser = await webkit.launch();
 
   const desktop = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-  await desktop.clock.install({ time: "2026-10-07T12:30:00Z" });
+  await desktop.clock.install({ time: pinnedNow });
   await login(desktop);
   const library = desktop.getByRole("button", { name: /^Plan / }).first();
   const mealName = (await library.getAttribute("aria-label"))!.replace(/^Plan /, "");
@@ -93,7 +100,7 @@ try {
   assert.equal(await planned.evaluate((node) => node === document.activeElement), true, "Escape returns focus to the planned card");
 
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
-  await mobile.clock.install({ time: "2026-10-07T12:30:00Z" });
+  await mobile.clock.install({ time: pinnedNow });
   await mobile.addInitScript(() => {
     const trusted: boolean[] = [];
     Object.assign(window, { issue66WebKitTrustedTouches: trusted });
