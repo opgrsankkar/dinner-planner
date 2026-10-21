@@ -1,5 +1,5 @@
 import type { Placement, RemoteMeal } from "../types";
-import type { Todoist } from "./todoist";
+import { reopenRequestId, type Todoist } from "./todoist";
 
 const base = "https://api.todoist.com/api/v1";
 const marker = "meal-planner-request-id: ";
@@ -428,8 +428,10 @@ export class TodoistApi implements Todoist {
   async delete(taskId: string, projectId: string, requestId: string) {
     const task = await this.get(taskId, projectId);
     if (!task) return;
+    // Delete is only documented for active tasks, so reopen a completed meal
+    // first. A retry after the reopen finds it active and just deletes it.
     if (task.completed)
-      throw new TodoistError("Completed meals cannot be deleted");
+      await this.reopen(taskId, projectId, reopenRequestId(requestId));
     await this.request(
       `/tasks/${encodeURIComponent(taskId)}`,
       "DELETE",
@@ -438,6 +440,19 @@ export class TodoistApi implements Todoist {
       true,
     );
     this.acknowledge(null, taskId);
+  }
+  async reopen(taskId: string, projectId: string, requestId: string) {
+    const task = await this.get(taskId, projectId);
+    if (!task) throw new TodoistError("Meal is missing from Meals");
+    if (!task.completed) return;
+    await this.request(
+      `/tasks/${encodeURIComponent(taskId)}/reopen`,
+      "POST",
+      undefined,
+      requestId,
+    );
+    const { completed: _completed, ...active } = task;
+    this.acknowledge(active);
   }
   async complete(taskId: string, projectId: string, requestId: string) {
     const task = await this.get(taskId, projectId);

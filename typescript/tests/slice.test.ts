@@ -686,7 +686,7 @@ test("real adapter uncertain create survives worker restart and invisible marker
     await f.close();
   }
 });
-test("completed real tasks have no fake request marker and remain noneditable; failures retain usable local board", async () => {
+test("completed real tasks have no fake request marker and stay editable; failures retain usable local board", async () => {
   const f = await fixture();
   try {
     const project = await f.provider.mealsProject();
@@ -704,13 +704,13 @@ test("completed real tasks have no fake request marker and remain noneditable; f
     const board = await f.store.board(f.provider);
     assert.equal(board.cards[0].completed, true);
     assert.equal(board.cards[0].requestId, "");
-    await assert.rejects(
-      f.store.change(
-        { requestId: randomUUID(), taskId: "opaque-real-id", kind: "delete" },
-        f.provider,
-      ),
-      /completed/,
+    // Completed meals can be fixed; the change remembers they were completed.
+    const deletion = await f.store.change(
+      { requestId: randomUUID(), taskId: "opaque-real-id", kind: "delete" },
+      f.provider,
     );
+    assert.equal(deletion.state, "pending");
+    assert.equal(JSON.parse(deletion.payload).complete, true);
     f.provider.list = async () => {
       throw new Error("Todoist request failed (503)");
     };

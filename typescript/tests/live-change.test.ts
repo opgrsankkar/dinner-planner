@@ -25,7 +25,16 @@ type RemoteTask = {
 
 function liveFixture() {
   const tasks = new Map<string, RemoteTask>();
-  const calls: { method: string; path: string }[] = [];
+  const calls: { method: string; path: string; requestId?: string }[] = [];
+  // Fail the next N calls of a step ("reopen", "close", "update") with a 503.
+  const failures = new Map<string, number>();
+  // Apply the next N calls of a step, then report a 503 (a lost acknowledgement).
+  const lostAcks = new Map<string, number>();
+  const take = (map: Map<string, number>, step: string) => {
+    const left = map.get(step) ?? 0;
+    if (left > 0) map.set(step, left - 1);
+    return left > 0;
+  };
   let gate: Promise<void> | null = null;
   let lists = 0;
   const make = (
@@ -45,7 +54,7 @@ function liveFixture() {
     const method = (init?.method ?? "GET").toUpperCase();
     const path = url.pathname;
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-    calls.push({ method, path });
+    calls.push({ method, path, requestId: new Headers(init?.headers).get("X-Request-Id") ?? undefined });
     if (path.endsWith("/projects"))
       return Response.json({
         results: [{ id: projectId, name: "Meals" }],
@@ -64,13 +73,16 @@ function liveFixture() {
       tasks.set(task.id, task);
       return Response.json(task);
     }
-    const match = path.match(/^\/api\/v1\/tasks\/([^/]+?)(\/close)?$/);
+    const match = path.match(/^\/api\/v1\/tasks\/([^/]+?)(\/close|\/reopen)?$/);
     if (match) {
       const id = decodeURIComponent(match[1]);
       const task = tasks.get(id);
+      const step = match[2] ? match[2].slice(1) : method === "POST" ? "update" : method;
+      if (take(failures, step)) return new Response(null, { status: 503 });
       if (match[2]) {
         if (!task) return new Response(null, { status: 404 });
-        task.checked = true;
+        task.checked = match[2] === "/close";
+        if (take(lostAcks, step)) return new Response(null, { status: 503 });
         return new Response(null, { status: 204 });
       }
       if (method === "GET")
@@ -94,6 +106,8 @@ function liveFixture() {
     api: new TodoistApi("synthetic-token", fetcher),
     tasks,
     calls,
+    failures,
+    lostAcks,
     listCount: () => lists,
     holdLists() {
       let release!: () => void;
@@ -216,7 +230,7 @@ test("immediate move after create succeeds despite stale active cache", async ()
   }
 });
 
-test("absent, completed and foreign tasks stay protected with authoritative lookup", async () => {
+test("absent and foreign tasks stay protected with authoritative lookup", async () => {
   const f = await setup();
   try {
     await assert.rejects(
@@ -224,22 +238,7 @@ test("absent, completed and foreign tasks stay protected with authoritative look
         { requestId: randomUUID(), taskId: randomUUID(), kind: "delete" },
         f.api,
       ),
-      /missing, completed, or does not belong/,
-    );
-    f.tasks.set("completed-task", {
-      id: "completed-task",
-      project_id: projectId,
-      content: "Completed meal",
-      description: "",
-      due: { date: "2030-10-01T08:00:00+05:30" },
-      checked: true,
-    });
-    await assert.rejects(
-      f.store.change(
-        { requestId: randomUUID(), taskId: "completed-task", kind: "delete" },
-        f.api,
-      ),
-      /completed/,
+      /missing or does not belong/,
     );
     f.tasks.set("foreign-task", {
       id: "foreign-task",
@@ -254,8 +253,111 @@ test("absent, completed and foreign tasks stay protected with authoritative look
         { requestId: randomUUID(), taskId: "foreign-task", kind: "delete" },
         f.api,
       ),
-      /belong|missing, completed/,
+      /belong/,
     );
+  } finally {
+    await f.close();
+  }
+});
+
+// A completed meal (one added to a past slot, or ticked off) can still be
+// fixed: it is reopened, changed, and a moved meal is completed again.
+function addCompleted(f: Awaited<ReturnType<typeof setup>>) {
+  f.tasks.set("done-task", {
+    id: "done-task",
+    project_id: projectId,
+    content: "Completed meal",
+    description: "",
+    due: { date: "2030-10-01T08:00:00+05:30" },
+    checked: true,
+  });
+  return {
+    requestId: randomUUID(),
+    taskId: "done-task",
+    kind: "move" as const,
+    slotId: f.board.slots[1].id,
+    date: "2030-10-02",
+  };
+}
+const steps = (f: Awaited<ReturnType<typeof setup>>) =>
+  f.calls
+    .filter((call) => call.method !== "GET" && call.path.startsWith("/api/v1/tasks/done-task"))
+    .map((call) => (call.method === "DELETE" ? "delete" : call.path.endsWith("/reopen") ? "reopen" : call.path.endsWith("/close") ? "close" : "update"));
+
+test("a completed meal is reopened, moved and completed again", async () => {
+  const f = await setup();
+  try {
+    const move = addCompleted(f);
+    await f.store.change(move, f.api);
+    const pending = (await f.store.board(f.api, "2030-09-30")).cards.find((card) => card.id === "done-task");
+    assert.equal(pending?.completed, true, "the pending card stays completed");
+    await f.worker.tick();
+    assert.equal((await f.store.db.outboxGet(move.requestId))?.state, "saved");
+    const task = f.tasks.get("done-task")!;
+    assert.match(task.due.date, new RegExp(`^2030-10-02T${f.board.slots[1].time}:00`));
+    assert.equal(task.checked, true, "the moved meal is completed again");
+    assert.deepEqual(steps(f), ["reopen", "update", "close"]);
+    const ids = f.calls.filter((call) => call.path.startsWith("/api/v1/tasks/done-task") && call.method !== "GET").map((call) => call.requestId);
+    assert.equal(new Set(ids).size, 3, "each step has its own request ID");
+    const card = (await f.store.board(f.api, "2030-09-30")).cards.find((card) => card.id === "done-task");
+    assert.equal(card?.date, "2030-10-02");
+    assert.equal(card?.completed, true);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a completed meal is reopened then deleted", async () => {
+  const f = await setup();
+  try {
+    const deletion = { requestId: randomUUID(), taskId: addCompleted(f).taskId, kind: "delete" as const };
+    await f.store.change(deletion, f.api);
+    await f.worker.tick();
+    assert.equal((await f.store.db.outboxGet(deletion.requestId))?.state, "saved");
+    assert.equal(f.tasks.has("done-task"), false);
+    assert.deepEqual(steps(f), ["reopen", "delete"]);
+  } finally {
+    await f.close();
+  }
+});
+
+test("moving a completed meal resumes after a failed step without losing completion", async () => {
+  for (const failing of ["update", "close"]) {
+    const f = await setup();
+    try {
+      const move = addCompleted(f);
+      await f.store.change(move, f.api);
+      f.failures.set(failing, 1);
+      await f.worker.tick();
+      const row = await f.store.db.outboxGet(move.requestId);
+      assert.equal(row?.state, "pending", `${failing} failure keeps the move pending`);
+      assert.equal(f.tasks.get("done-task")!.checked, false, "the meal is reopened mid-way");
+      await f.store.db.outboxUpdate(move.requestId, { nextAt: "0" });
+      await f.worker.tick();
+      assert.equal((await f.store.db.outboxGet(move.requestId))?.state, "saved", `${failing} failure recovers`);
+      const task = f.tasks.get("done-task")!;
+      assert.equal(task.checked, true, `${failing} failure still ends completed`);
+      assert.match(task.due.date, /^2030-10-02T/);
+      assert.equal(steps(f).filter((step) => step === "reopen").length, 1, "the meal is reopened once");
+    } finally {
+      await f.close();
+    }
+  }
+});
+
+test("a lost close acknowledgement is not repeated on retry", async () => {
+  const f = await setup();
+  try {
+    const move = addCompleted(f);
+    await f.store.change(move, f.api);
+    f.lostAcks.set("close", 1);
+    await f.worker.tick();
+    assert.equal((await f.store.db.outboxGet(move.requestId))?.state, "pending");
+    assert.equal(f.tasks.get("done-task")!.checked, true);
+    await f.store.db.outboxUpdate(move.requestId, { nextAt: "0" });
+    await f.worker.tick();
+    assert.equal((await f.store.db.outboxGet(move.requestId))?.state, "saved");
+    assert.deepEqual(steps(f), ["reopen", "update", "close"], "the finished move is acknowledged without new writes");
   } finally {
     await f.close();
   }

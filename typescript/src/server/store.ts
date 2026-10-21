@@ -11,10 +11,19 @@ import type {
   Slot,
 } from "../types";
 import type { Todoist } from "./todoist";
-import { completionRequestId } from "./todoist";
+import { completionRequestId, reopenRequestId } from "./todoist";
 import { TodoistError } from "./todoist-api";
 export const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// Prefer an authoritative, task-scoped read; a cached active listing can lag
+// behind a create/rename. Providers without get() use a forced-fresh listing.
+async function findTask(todoist: Todoist, taskId: string, projectId: string) {
+  return todoist.get
+    ? await todoist.get(taskId, projectId)
+    : (await todoist.list(projectId, { fresh: true })).find(
+        (task) => task.id === taskId && task.projectId === projectId,
+      ) ?? null;
+}
 const settingsId = "00000000-0000-4000-8000-000000000001";
 export class Store {
   readonly db;
@@ -228,9 +237,13 @@ export class Store {
         )
           continue;
         const index = cards.findIndex((card) => card.id === op.remoteId);
+        // A card at the destination confirms the write. A card completed
+        // elsewhere was completed in Todoist after an ordinary change, so
+        // provider truth wins; a meal moved while completed is still expected
+        // to be completed, so only its position counts.
         if (
           index >= 0 &&
-          (cards[index].completed ||
+          ((cards[index].completed && !payload.complete) ||
             (cards[index].date === payload.date &&
               cards[index].time === payload.time))
         ) {
@@ -380,19 +393,11 @@ export class Store {
         )
       )
         throw new Error("Meal already has a pending change");
-      // Prefer an authoritative, task-scoped read. A cached active listing can
-      // lag behind a create/rename, which must never block deleting a meal the
-      // planner just acknowledged saving. Providers without get() fall back to a
-      // forced-fresh listing.
-      const task = todoist.get
-        ? await todoist.get(input.taskId, project.id)
-        : (await todoist.list(project.id, { fresh: true })).find(
-            (task) => task.id === input.taskId && task.projectId === project.id,
-          );
-      if (!task || task.completed)
-        throw new Error(
-          "Meal is missing, completed, or does not belong to Meals",
-        );
+      // A cached active listing can lag behind a create/rename, which must never
+      // block changing a meal the planner just acknowledged saving.
+      const task = await findTask(todoist, input.taskId, project.id);
+      if (!task)
+        throw new Error("Meal is missing or does not belong to Meals");
       const slot = this.db.slotGet(input.slotId ?? "");
       if (input.kind === "move" && (!slot || !validDate(input.date ?? "")))
         throw new Error("Invalid destination");
@@ -405,6 +410,8 @@ export class Store {
         slotId: slot?.id ?? "",
         date: input.kind === "move" ? input.date! : task.date,
         time: input.kind === "move" ? slot!.time : task.time,
+        // A completed meal is reopened to change it; a moved one is completed again.
+        ...(task.completed ? { complete: true } : {}),
       };
       return this.enqueue(payload, input.requestId);
     });
@@ -623,23 +630,37 @@ export class Worker {
           }),
         );
         if (payload.kind === "delete") {
+          // Providers delete completed meals too (Todoist reopens first).
           await this.todoist.delete(payload.taskId!, project.id, action.id);
           // Success/404 is final acknowledgement. Never GET to validate a delete.
         } else {
-          const task = await this.todoist.move(
-            { ...payload, taskId: payload.taskId! },
-            action.id,
-          );
-          if (
-            task.id !== payload.taskId ||
-            task.projectId !== project.id ||
-            task.date !== payload.date ||
-            task.time !== payload.time
-          )
-            throw new TodoistError(
-              "Todoist acknowledgement did not match move",
-              true,
+          // A completed meal is reopened, moved, then completed again. Reading
+          // current state first lets a retry after any partial step resume
+          // without repeating or losing work.
+          const current = await findTask(this.todoist, payload.taskId!, project.id);
+          if (!current) throw new TodoistError("Meal no longer exists");
+          const arrived =
+            current.date === payload.date && current.time === payload.time;
+          if (!(current.completed && arrived)) {
+            if (current.completed)
+              await this.todoist.reopen(current.id, project.id, reopenRequestId(action.id));
+            const task = await this.todoist.move(
+              { ...payload, taskId: payload.taskId! },
+              action.id,
             );
+            if (
+              task.id !== payload.taskId ||
+              task.projectId !== project.id ||
+              task.date !== payload.date ||
+              task.time !== payload.time
+            )
+              throw new TodoistError(
+                "Todoist acknowledgement did not match move",
+                true,
+              );
+            if (payload.complete || current.completed)
+              await this.todoist.complete(task.id, project.id, completionRequestId(action.id));
+          }
         }
         await this.store.write(() =>
           this.store.db.outboxUpdate(action.id, {
