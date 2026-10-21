@@ -9,6 +9,20 @@ import { isPastSlot } from "../past-slot";
 import { requestId as newRequestId } from "../request-id";
 import { libraryDragPreview, sameLibraryDragPreview, type DragPreview } from "../drag-preview";
 export const Route = createFileRoute("/")({ component: Planner });
+type TouchDragItem = { kind: "planned"; card: Card } | { kind: "library"; meal: Meal };
+type TouchDrag = {
+  item: TouchDragItem;
+  source: HTMLElement;
+  startX: number;
+  startY: number;
+  x: number;
+  y: number;
+  identifier: number;
+  timer: ReturnType<typeof setTimeout>;
+  active: boolean;
+  ghost: HTMLElement | null;
+  frame: number;
+};
 type Intent = {
   requestId: string;
   mealId?: string;
@@ -78,7 +92,9 @@ export function Planner() {
   const boardRef = useRef<Board | null>(board);
   boardRef.current = board;
   const changeRef = useRef<(card: Card, kind: "move" | "delete", date?: string, slot?: Slot) => Promise<void>>(async () => {});
+  const placeRef = useRef<(meal: Meal, date: string, slot: Slot) => Promise<void>>(async () => {});
   const clearTouchDragRef = useRef<() => void>(() => {});
+  const activateTouchDragRef = useRef<(drag: TouchDrag) => void>(() => {});
   const [signedOut, setSignedOut] = useState(false);
   const [error, setError] = useState("");
   const [password, setPassword] = useState("");
@@ -94,37 +110,100 @@ export function Planner() {
   const libraryDragged = useRef(false);
   const dragFinishedAt = useRef(0);
   const dragFinishedCardId = useRef<string | null>(null);
-  const touchDrag = useRef<{
-    card: Card;
-    source: HTMLDivElement;
-    startX: number;
-    startY: number;
-    lastX: number;
-    lastY: number;
-    x: number;
-    y: number;
-    identifier: number;
-    timer: ReturnType<typeof setTimeout>;
-    active: boolean;
-    scrolling: boolean;
-  } | null>(null);
+  const touchDrag = useRef<TouchDrag | null>(null);
   useEffect(() => () => libraryAnimations.current.forEach(animation => animation.cancel()), []);
   useEffect(() => {
     const clearTouchDrag = () => {
       const drag = touchDrag.current;
       if (drag) {
         clearTimeout(drag.timer);
+        cancelAnimationFrame(drag.frame);
+        drag.ghost?.remove();
         drag.source.classList.remove("is-touch-dragging");
-        if (drag.active) {
+        if (drag.active && drag.item.kind === "planned") {
           dragFinishedAt.current = Date.now();
-          dragFinishedCardId.current = drag.card.id;
+          dragFinishedCardId.current = drag.item.card.id;
         }
+        if (drag.active && drag.item.kind === "library") setDragPreview(null);
       }
       touchDrag.current = null;
-      document.body.classList.remove("planner-dragging", "trash-hover");
+      document.body.classList.remove("planner-dragging", "touch-dragging", "trash-hover");
       document.querySelectorAll(".meal-cell.touch-drop-hover").forEach((cell) => cell.classList.remove("touch-drop-hover"));
     };
     clearTouchDragRef.current = clearTouchDrag;
+    // The finger covers what it is dragging, so a copy floats just above it.
+    const moveGhost = (drag: TouchDrag) => {
+      const ghost = drag.ghost;
+      if (!ghost) return;
+      ghost.style.transform = `translate(${drag.x - ghost.offsetWidth / 2}px, ${drag.y - ghost.offsetHeight - 28}px)`;
+    };
+    const touchTarget = (drag: TouchDrag) => {
+      const target = document.elementFromPoint(drag.x, drag.y);
+      return {
+        cell: target?.closest<HTMLElement>(".meal-cell[data-date][data-slot-id]") ?? null,
+        overTrash: drag.item.kind === "planned" && !!target?.closest(".trash-drop-target"),
+      };
+    };
+    const showTouchTarget = (drag: TouchDrag) => {
+      const { cell, overTrash } = touchTarget(drag);
+      if (drag.item.kind === "library") {
+        const next = cell ? libraryDragPreview(drag.item.meal, cell.dataset.date!, cell.dataset.slotId!) : null;
+        setDragPreview((previous) => (sameLibraryDragPreview(previous, next) ? previous : next));
+        return;
+      }
+      document.body.classList.toggle("trash-hover", overTrash);
+      document.querySelectorAll(".meal-cell.touch-drop-hover").forEach((item) => item !== cell && item.classList.remove("touch-drop-hover"));
+      cell?.classList.add("touch-drop-hover");
+    };
+    // Holding near an edge scrolls the board/page so off-screen days and slots stay reachable.
+    const autoScroll = (drag: TouchDrag) => {
+      drag.frame = 0;
+      if (touchDrag.current !== drag || !drag.active) return;
+      const zone = 48;
+      const speed = (distance: number) => Math.ceil(((zone - Math.max(distance, 0)) / zone) * 14);
+      let scrolled = false;
+      const grid = document.querySelector<HTMLElement>(".grid-scroll");
+      if (grid) {
+        const box = grid.getBoundingClientRect();
+        const left = Math.max(box.left, 0);
+        const right = Math.min(box.right, innerWidth);
+        if (drag.y >= box.top && drag.y <= box.bottom) {
+          const before = grid.scrollLeft;
+          if (drag.x < left + zone) grid.scrollLeft -= speed(drag.x - left);
+          else if (drag.x > right - zone) grid.scrollLeft += speed(right - drag.x);
+          scrolled ||= grid.scrollLeft !== before;
+        }
+      }
+      const top = Math.max(document.querySelector(".topbar")?.getBoundingClientRect().bottom ?? 0, 0);
+      const before = scrollY;
+      if (drag.y < top + zone) scrollBy(0, -speed(drag.y - top));
+      else if (drag.y > innerHeight - zone && !touchTarget(drag).overTrash) scrollBy(0, speed(innerHeight - drag.y));
+      scrolled ||= scrollY !== before;
+      if (scrolled) showTouchTarget(drag);
+      drag.frame = requestAnimationFrame(() => autoScroll(drag));
+    };
+    activateTouchDragRef.current = (drag) => {
+      drag.active = true;
+      navigator.vibrate?.(10);
+      drag.source.classList.add("is-touch-dragging");
+      document.body.classList.add("touch-dragging");
+      if (drag.item.kind === "planned") {
+        dialogTrigger.current = drag.source;
+        document.body.classList.add("planner-dragging");
+      } else {
+        libraryDragged.current = true;
+      }
+      const ghost = document.createElement("div");
+      ghost.className = "touch-drag-ghost";
+      ghost.setAttribute("aria-hidden", "true");
+      ghost.textContent = drag.item.kind === "planned" ? drag.item.card.name : drag.item.meal.name;
+      ghost.style.width = `${Math.min(drag.source.getBoundingClientRect().width, 160)}px`;
+      document.body.append(ghost);
+      drag.ghost = ghost;
+      moveGhost(drag);
+      showTouchTarget(drag);
+      drag.frame = requestAnimationFrame(() => autoScroll(drag));
+    };
     const touchStart = (event: TouchEvent) => {
       if (event.touches.length > 1 && touchDrag.current) clearTouchDrag();
     };
@@ -141,30 +220,15 @@ export function Planner() {
         return;
       }
       if (!drag.active) {
-        if (Math.hypot(touch.clientX - drag.startX, touch.clientY - drag.startY) > 10) {
-          clearTimeout(drag.timer);
-          drag.scrolling = true;
-        }
-        if (drag.scrolling) {
-          event.preventDefault();
-          const dx = touch.clientX - drag.lastX;
-          const dy = touch.clientY - drag.lastY;
-          const grid = drag.source.closest<HTMLElement>(".grid-scroll");
-          if (Math.abs(dx) > Math.abs(dy) && grid) grid.scrollLeft -= dx;
-          else window.scrollBy({ top: -dy, left: 0 });
-          drag.lastX = touch.clientX;
-          drag.lastY = touch.clientY;
-        }
+        // Moving before the hold completes is a normal scroll; leave it to the browser.
+        if (Math.hypot(touch.clientX - drag.startX, touch.clientY - drag.startY) > 10) clearTouchDrag();
         return;
       }
       event.preventDefault();
       drag.x = touch.clientX;
       drag.y = touch.clientY;
-      const target = document.elementFromPoint(drag.x, drag.y);
-      const overTrash = !!target?.closest(".trash-drop-target");
-      document.body.classList.toggle("trash-hover", overTrash);
-      document.querySelectorAll(".meal-cell.touch-drop-hover").forEach((cell) => cell.classList.remove("touch-drop-hover"));
-      target?.closest(".meal-cell")?.classList.add("touch-drop-hover");
+      moveGhost(drag);
+      showTouchTarget(drag);
     };
     const touchEnd = (event: TouchEvent) => {
       const drag = touchDrag.current;
@@ -179,38 +243,36 @@ export function Planner() {
         clearTouchDrag();
         return;
       }
-      if (event.changedTouches.length) {
-        const touch = Array.from(event.changedTouches).find((item) => item.identifier === drag.identifier)!;
-        drag.x = touch.clientX;
-        drag.y = touch.clientY;
-      }
-      const active = drag.active;
-      const scrolling = drag.scrolling;
-      const target = document.elementFromPoint(drag.x, drag.y);
-      const cell = target?.closest<HTMLElement>(".meal-cell[data-date][data-slot-id]");
-      const overTrash = !!target?.closest(".trash-drop-target");
-      const card = drag.card;
-      const source = drag.source;
+      const touch = Array.from(event.changedTouches).find((item) => item.identifier === drag.identifier)!;
+      drag.x = touch.clientX;
+      drag.y = touch.clientY;
+      const { active, item, source } = drag;
+      const { cell, overTrash } = touchTarget(drag);
       clearTouchDrag();
-      if (scrolling) {
-        event.preventDefault();
-        return;
-      }
       if (!active) return;
       event.preventDefault();
+      const slot = boardRef.current?.slots.find((entry) => entry.id === cell?.dataset.slotId);
+      if (item.kind === "library") {
+        if (cell && slot) void placeRef.current(item.meal, cell.dataset.date!, slot);
+        return;
+      }
+      const card = item.card;
       dragFinishedAt.current = Date.now();
       dragFinishedCardId.current = card.id;
       if (overTrash && card.state === "saved" && !card.completed) {
         dialogTrigger.current = source;
         setDeleteTarget(card);
         deleteDialog.current?.showModal();
-      } else if (cell && card.state === "saved" && !card.completed) {
-        const slot = boardRef.current?.slots.find((item) => item.id === cell.dataset.slotId);
-        if (slot && (cell.dataset.date !== card.date || slot.id !== card.slotId))
+      } else if (cell && slot && card.state === "saved" && !card.completed) {
+        if (cell.dataset.date !== card.date || slot.id !== card.slotId)
           void changeRef.current(card, "move", cell.dataset.date, slot);
       }
     };
     const cancelTouchDrag = () => clearTouchDrag();
+    // Android long-press raises contextmenu; it must not interrupt a hold-to-drag.
+    const blockTouchContextMenu = (event: Event) => {
+      if (touchDrag.current) event.preventDefault();
+    };
     const finishPlannedDrag = () => {
       clearTouchDrag();
       draggedLibraryMeal.current = null;
@@ -226,6 +288,7 @@ export function Planner() {
     window.addEventListener("touchmove", touchMove, { passive: false });
     window.addEventListener("touchend", touchEnd, { passive: false });
     window.addEventListener("touchcancel", cancelTouchDrag);
+    window.addEventListener("contextmenu", blockTouchContextMenu, true);
     document.addEventListener("keydown", cancelPlannedDrag, true);
     return () => {
       window.removeEventListener("dragend", finishPlannedDrag, true);
@@ -235,6 +298,7 @@ export function Planner() {
       window.removeEventListener("touchmove", touchMove);
       window.removeEventListener("touchend", touchEnd);
       window.removeEventListener("touchcancel", cancelTouchDrag);
+      window.removeEventListener("contextmenu", blockTouchContextMenu, true);
       document.removeEventListener("keydown", cancelPlannedDrag, true);
       finishPlannedDrag();
       clearTouchDragRef.current = () => {};
@@ -516,34 +580,27 @@ export function Planner() {
     await sendIntent(requestId);
   }
   changeRef.current = change;
-  function startPlannedTouchDrag(card: Card, source: HTMLDivElement, event: React.TouchEvent<HTMLDivElement>) {
-    if (event.touches.length !== 1 || card.state !== "saved" || card.completed) {
-      if (touchDrag.current) clearTouchDragRef.current();
-      return;
-    }
+  placeRef.current = place;
+  function startTouchDrag(item: TouchDragItem, source: HTMLElement, event: React.TouchEvent<HTMLElement>) {
     if (touchDrag.current) clearTouchDragRef.current();
+    if (event.touches.length !== 1) return;
+    if (item.kind === "planned" && (item.card.state !== "saved" || item.card.completed)) return;
     const touch = event.touches[0]!;
-    const drag = {
-      card,
+    const drag: TouchDrag = {
+      item,
       source,
       startX: touch.clientX,
       startY: touch.clientY,
-      lastX: touch.clientX,
-      lastY: touch.clientY,
       x: touch.clientX,
       y: touch.clientY,
       identifier: touch.identifier,
-      timer: 0 as unknown as ReturnType<typeof setTimeout>,
+      timer: setTimeout(() => {
+        if (touchDrag.current === drag) activateTouchDragRef.current(drag);
+      }, 400),
       active: false,
-      scrolling: false,
+      ghost: null,
+      frame: 0,
     };
-    drag.timer = setTimeout(() => {
-      if (touchDrag.current !== drag) return;
-      drag.active = true;
-      dialogTrigger.current = source;
-      source.classList.add("is-touch-dragging");
-      document.body.classList.add("planner-dragging");
-    }, 450);
     touchDrag.current = drag;
   }
   const days = Array.from({ length: 7 }, (_, index) => {
@@ -897,7 +954,7 @@ export function Planner() {
                                     !card.completed &&
                                     !coarsePointer
                                   }
-                                  onTouchStart={(e) => startPlannedTouchDrag(card, e.currentTarget, e)}
+                                  onTouchStart={(e) => startTouchDrag({ kind: "planned", card }, e.currentTarget, e)}
                                   onClick={(e) => {
                                     if (
                                       dragFinishedCardId.current === card.id &&
@@ -1100,10 +1157,12 @@ export function Planner() {
                     aria-label={`Plan ${meal.name}`}
                     title={`Click to plan ${meal.name}, or drag to a calendar slot`}
                     key={meal.id}
-                    draggable
+                    draggable={!coarsePointer}
                     onPointerDown={() => { libraryDragged.current = false; }}
+                    onTouchStart={(e) => startTouchDrag({ kind: "library", meal }, e.currentTarget, e)}
                     onKeyDown={() => { libraryDragged.current = false; }}
                     onDragStart={(e) => {
+                      clearTouchDragRef.current();
                       libraryDragged.current = true;
                       draggedLibraryMeal.current = meal;
                       e.currentTarget.classList.add("is-dragging");
