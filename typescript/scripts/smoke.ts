@@ -176,6 +176,8 @@ try {
     .locator(".meal-chip")
     .filter({ hasText: "History meal" })
     .waitFor({ state: "detached" });
+  // Plan on next week: past slots are auto-completed and could not be moved later.
+  await page.getByRole("button", { name: "Next week", exact: true }).click();
   await page.getByRole("searchbox").fill("Browser smoke meal");
   await page.getByRole("button", { name: "Add meal", exact: true }).click();
   await page
@@ -201,6 +203,7 @@ try {
     "Card feedback must stay small",
   );
   await page.reload();
+  await page.getByRole("button", { name: "Next week", exact: true }).click();
   await page.getByRole("button", { name: /^Retry meal:/ }).waitFor();
   await page.getByRole("button", { name: /^Retry meal:/ }).click();
   await page.getByRole("status", { name: "Meal saved", exact: true }).waitFor();
@@ -218,7 +221,8 @@ try {
     await page.getByRole("link", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Appearance", exact: true }).click();
     await page.getByRole("radio", { name: /System/ }).click();
-    await page.waitForFunction(() => !!document.querySelector<HTMLInputElement>('.theme-option input')?.checked);
+    await page.waitForFunction(() => Array.from(document.querySelectorAll<HTMLInputElement>(".theme-option input"))
+      .some((input) => input.checked && input.closest("label")?.textContent?.includes("System")));
     await page.waitForFunction(() => document.documentElement.dataset.theme ===
       (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
     await page.getByRole("link", { name: "← Back to plan", exact: true }).click();
@@ -269,6 +273,7 @@ try {
   }
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByRole("button", { name: "Next week", exact: true }).click();
+  await page.getByRole("button", { name: "Next week", exact: true }).click();
   assert.equal(await page.locator(".meal-chip").count(), 0);
   await page
     .getByRole("button", { name: "Previous week", exact: true })
@@ -302,7 +307,7 @@ try {
     1,
   );
   await page
-    .getByRole("button", { name: "Move Browser smoke meal", exact: true })
+    .getByRole("button", { name: "Move or delete Browser smoke meal", exact: true })
     .click();
   await page
     .getByLabel("Meal slot", { exact: true })
@@ -313,7 +318,15 @@ try {
     .waitFor();
   await page.getByRole("status", { name: "Meal saved", exact: true }).waitFor();
   await page
-    .getByRole("button", { name: "Delete Browser smoke meal", exact: true })
+    .getByRole("button", { name: "Move or delete Browser smoke meal", exact: true })
+    .click();
+  await page
+    .getByRole("dialog", { name: "Move Browser smoke meal" })
+    .getByRole("button", { name: "Delete meal", exact: true })
+    .click();
+  await page
+    .getByRole("dialog", { name: "Confirm meal deletion" })
+    .getByRole("button", { name: "Delete meal", exact: true })
     .click();
   await page
     .getByRole("button", { name: "Saving meal", exact: true })
@@ -386,12 +399,8 @@ try {
     assert.ok(attempt < 99, "Slot time updates must finish");
     await page.waitForTimeout(100);
   }
-  await page
-    .getByRole("button", { name: "Reorder Morning", exact: true })
-    .click();
-  await page
-    .getByRole("button", { name: "Move Morning down", exact: true })
-    .click();
+  // Slots are ordered by time: moving Morning after Lunch re-sorts it.
+  await page.getByLabel("Slot time 1", { exact: true }).fill("14:00");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await page.getByRole("button", { name: "Saved", exact: true }).waitFor();
   await page.reload();
@@ -401,21 +410,25 @@ try {
     await page.getByLabel("Slot label 2", { exact: true }).inputValue(),
     "Morning",
   );
+  // New, unsaved slots are added at the top.
   await page.getByRole("button", { name: "+ Add slot", exact: true }).click();
-  await page.getByLabel("Slot label 4", { exact: true }).fill("Snack");
-  await page.getByLabel("Slot time 4", { exact: true }).fill("16:00");
+  await page.getByLabel("Slot label 1", { exact: true }).fill("Snack");
+  await page.getByLabel("Slot time 1", { exact: true }).fill("16:00");
+  // Desktop reveals a row's remove action on hover once its fields lose focus.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.locator(".slot-edit-row").first().hover();
   await page
     .getByRole("button", { name: "Remove slot Snack", exact: true })
     .click();
-  assert.equal(await page.locator(".slot-edit-row").count(), 3);
   await page
-    .getByRole("button", { name: "Reorder Morning", exact: true })
-    .dragTo(page.locator(".slot-edit-row").last());
+    .getByRole("button", { name: "Remove slot Snack", exact: true })
+    .waitFor({ state: "detached" }); // The row animates out.
+  assert.equal(await page.locator(".slot-edit-row").count(), 3);
   assert.equal(
-    await page.getByLabel("Slot label 3", { exact: true }).inputValue(),
-    "Morning",
+    await page.getByRole("button", { name: "Revert", exact: true }).isDisabled(),
+    true,
+    "Adding then removing a draft slot leaves nothing to revert",
   );
-  await page.getByRole("button", { name: "Revert", exact: true }).click();
   await page.getByRole("button", { name: "Meal library", exact: true }).click();
   page.once("dialog", (dialog) => dialog.accept());
   await page
@@ -431,6 +444,7 @@ try {
     })
     .waitFor({ state: "detached" });
   await page.getByRole("link", { name: "← Back to plan", exact: true }).click();
+  await page.getByRole("button", { name: "Next week", exact: true }).click();
   await page
     .locator(".meal-chip")
     .filter({ hasText: "Vegetable pasta" })
@@ -445,6 +459,9 @@ try {
   await mobilePage.getByLabel("Password", { exact: true }).fill(password);
   await mobilePage
     .getByRole("button", { name: "Sign in", exact: true })
+    .click();
+  await mobilePage
+    .getByRole("button", { name: "Next week", exact: true })
     .click();
   await mobilePage
     .getByRole("button", { name: "Plan Dal & rice", exact: true })
@@ -465,7 +482,7 @@ try {
     "Mobile planner scrolls horizontally",
   );
   await mobilePage
-    .getByRole("button", { name: "Move Dal & rice", exact: true })
+    .getByRole("button", { name: "Move or delete Dal & rice", exact: true })
     .click();
   await mobilePage
     .getByLabel("Meal slot", { exact: true })
@@ -477,10 +494,15 @@ try {
     .getByRole("button", { name: "Saving meal", exact: true })
     .waitFor();
   await mobilePage
-    .getByRole("button", { name: "Delete Dal & rice", exact: true })
-    .waitFor();
+    .getByRole("button", { name: "Move or delete Dal & rice", exact: true })
+    .click();
   await mobilePage
-    .getByRole("button", { name: "Delete Dal & rice", exact: true })
+    .getByRole("dialog", { name: "Move Dal & rice" })
+    .getByRole("button", { name: "Delete meal", exact: true })
+    .click();
+  await mobilePage
+    .getByRole("dialog", { name: "Confirm meal deletion" })
+    .getByRole("button", { name: "Delete meal", exact: true })
     .click();
   await mobilePage
     .locator(".meal-chip")
@@ -514,6 +536,9 @@ try {
   );
   await page.getByRole("button", { name: "Delete meal", exact: true }).click();
   await dragMeal.waitFor({ state: "detached" });
+  // Log out lives in Settings → Account.
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Account", exact: true }).click();
   await page.getByRole("button", { name: "Log out", exact: true }).click();
   await page.getByRole("button", { name: "Sign in", exact: true }).waitFor();
   assert.equal(
@@ -522,7 +547,7 @@ try {
   );
   assert.deepEqual(errors, []);
   console.log(
-    "HTTP and desktop/mobile browser smoke passed: login, add, Plan, drag placement/move, button move/delete, retry, reload pending, spinner/check, Settings Save/Revert/failure/reorder, library removal preserving plan, theme, completed history/warnings, navigation, drag delete confirmation, logout.",
+    "HTTP and desktop/mobile browser smoke passed: login, add, Plan, drag placement/move, card move/delete dialog, retry, reload pending, spinner/check, Settings Save/Revert/failure/time ordering, library removal preserving plan, theme, completed history/warnings, navigation, drag delete confirmation, logout.",
   );
 } finally {
   await browser?.close();
