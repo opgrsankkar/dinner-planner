@@ -1,5 +1,5 @@
 import { createFileRoute, useLocation } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { SettingsPage } from "../settings";
 import { WeekPicker } from "../WeekPicker";
 import { AddMealDialog, type CellTarget } from "../AddMealDialog";
@@ -82,6 +82,46 @@ function Icon({ name, spin = false }: { name: string; spin?: boolean }) {
     <svg className={`ui-icon${spin ? " sync-spinner" : ""}`} aria-hidden="true">
       <use href={`/static/lucide-icons.svg#${name}`} />
     </svg>
+  );
+}
+// Measured, not assumed: fonts (and so the top bar and day headers) differ by device.
+function fitSlotRows() {
+  const rows = Array.from(document.querySelectorAll<HTMLElement>(".meal-grid tbody tr"));
+  const narrow = matchMedia("(max-width: 900px)").matches;
+  if (!rows.length || !narrow) {
+    rows.forEach((row) => row.style.removeProperty("--row"));
+    return;
+  }
+  const topbar = document.querySelector(".topbar")!.getBoundingClientRect().height;
+  const header = document.querySelector(".meal-grid thead")!.getBoundingClientRect().height;
+  const probe = document.createElement("div");
+  probe.style.cssText = "position:fixed;top:0;height:100svh;visibility:hidden;pointer-events:none";
+  document.body.append(probe);
+  const visible = probe.getBoundingClientRect().height;
+  probe.remove();
+  // A cell needs its padding, its meals with gaps, and a minimal "+" strip.
+  const needs = rows.map((row) =>
+    Math.max(
+      ...Array.from(row.querySelectorAll<HTMLElement>(".meal-cell-content"), (content) =>
+        Array.from(content.children)
+          .filter((child) => !child.classList.contains("cell-add-button"))
+          .reduce((sum, child) => sum + (child as HTMLElement).offsetHeight + 4, 12 + 20),
+      ),
+    ),
+  );
+  let space = visible - topbar - header - 8;
+  let flexible = needs.map((_, index) => index);
+  // Rows needing more than an equal share keep their need; the rest split the remainder.
+  for (;;) {
+    const share = space / flexible.length;
+    const busy = flexible.filter((index) => needs[index] > share);
+    if (!busy.length || busy.length === flexible.length) break;
+    busy.forEach((index) => (space -= needs[index]));
+    flexible = flexible.filter((index) => needs[index] <= share);
+  }
+  const share = Math.floor(space / flexible.length);
+  rows.forEach((row, index) =>
+    row.style.setProperty("--row", `${Math.max(flexible.includes(index) ? share : needs[index], needs[index], 60)}px`),
   );
 }
 export function Planner() {
@@ -457,6 +497,23 @@ export function Planner() {
       window.removeEventListener("focus", visible);
     };
   }, [refresh, syncing]);
+  // Narrow screens fit the week into the visible height: busy slot rows get
+  // the height their meals need and the other rows share what is left.
+  useLayoutEffect(() => {
+    fitSlotRows();
+  });
+  const boardShown = !!board && !settingsPage;
+  useEffect(() => {
+    if (!boardShown) return;
+    // Late font loads or text changes resize the top bar/day headers without a render.
+    const observer = new ResizeObserver(fitSlotRows);
+    for (const element of document.querySelectorAll(".topbar, .meal-grid thead")) observer.observe(element);
+    window.addEventListener("resize", fitSlotRows);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", fitSlotRows);
+    };
+  }, [boardShown]);
   useEffect(() => {
     if (board) setTheme(board.settings.theme);
   }, [board?.settings.theme]);
