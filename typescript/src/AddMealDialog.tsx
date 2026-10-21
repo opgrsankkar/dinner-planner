@@ -11,6 +11,7 @@ export function AddMealDialog({
   focusSearch,
   onPick,
   onCreate,
+  onShuffle,
   onClose,
   onKeyDown,
 }: {
@@ -19,6 +20,7 @@ export function AddMealDialog({
   focusSearch: boolean;
   onPick: (meal: Meal, target: CellTarget) => void;
   onCreate: (name: string) => Promise<Meal>;
+  onShuffle: () => Promise<void>;
   onClose: () => void;
   onKeyDown: (event: KeyboardEvent<HTMLDialogElement>) => void;
 }) {
@@ -27,6 +29,7 @@ export function AddMealDialog({
   const searchInput = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
+  const [shuffling, setShuffling] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
     if (!target || dialog.current?.open) return;
@@ -103,19 +106,43 @@ export function AddMealDialog({
           <p className="add-meal-note">This time has passed, so the meal will be marked as done.</p>
         )}
         <label htmlFor="add-meal-search" className="visually-hidden">Meal</label>
-        <input
-          id="add-meal-search"
-          ref={searchInput}
-          type="search"
-          autoComplete="off"
-          placeholder="Search or type a new meal…"
-          value={search}
-          disabled={creating}
-          onChange={(e) => {
-            setSearch(e.target.value);
-            setError("");
-          }}
-        />
+        <div className="add-meal-search-row">
+          <input
+            id="add-meal-search"
+            ref={searchInput}
+            type="search"
+            autoComplete="off"
+            placeholder="Search or type a new meal…"
+            value={search}
+            disabled={creating}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setError("");
+            }}
+          />
+          <button
+            className="add-meal-shuffle"
+            type="button"
+            aria-label="Shuffle meal library"
+            title="Shuffle meal library"
+            disabled={shuffling}
+            onClick={async () => {
+              setShuffling(true);
+              setError("");
+              try {
+                await onShuffle();
+              } catch (e) {
+                setError(e instanceof Error ? e.message : "Could not shuffle. Please try again.");
+              } finally {
+                setShuffling(false);
+              }
+            }}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="m18 3 3 3-3 3M18 15l3 3-3 3M3 6h3c5 0 7 12 12 12h3M3 18h3c2 0 4-2 6-6s4-6 6-6h3" />
+            </svg>
+          </button>
+        </div>
         {error && <p className="add-meal-error" role="alert">{error}</p>}
         {matches.length > 0 || canCreate ? (
           <ul className="add-meal-options" aria-label="Meal library">

@@ -127,15 +127,16 @@ try {
   await mobileMove.waitFor({ state: "hidden" });
   assert.equal(await mobilePlanned.evaluate((node) => node === document.activeElement), true, "touch-canceling Move restores focus to its card");
 
-  const planTrigger = mobile.getByRole("button", { name: `Plan ${mealName}`, exact: true });
+  // Phones plan from a cell's "+" (the library panel is hidden on narrow screens).
+  assert.equal(await mobile.locator(".library-list").isVisible(), false, "the library panel is hidden on phones");
+  const planTrigger = mobile.locator(".cell-add-button").first();
   const planTriggerBox = await planTrigger.boundingBox();
   assert.ok(planTriggerBox);
   await mobile.touchscreen.tap(planTriggerBox.x + planTriggerBox.width / 2, planTriggerBox.y + planTriggerBox.height / 2);
-  const mobilePlan = mobile.getByRole("dialog", { name: `Plan ${mealName}` });
+  const mobilePlan = mobile.getByRole("dialog", { name: /^Add to / });
   await mobilePlan.waitFor();
-  assert.equal(await mobile.evaluate(() => document.activeElement?.id), "plan-title", "WebKit touch Plan dialog starts at its heading");
-  assert.ok(await mobile.locator("#plan-day").inputValue(), "touch Plan keeps its default date");
-  assert.ok(await mobile.locator("#plan-slot").inputValue(), "touch Plan keeps its default slot");
+  assert.equal(await mobile.evaluate(() => document.activeElement?.id), "add-meal-title", "WebKit touch add dialog starts at its heading");
+  assert.ok(await mobilePlan.getByRole("button", { name: mealName, exact: true }).isVisible(), "touch add dialog lists the library");
   await mobile.screenshot({ path: join(screenshots, "mobile-light-plan.png"), fullPage: true });
   await mobile.keyboard.press("Escape");
   await mobilePlan.waitFor({ state: "hidden" });

@@ -156,38 +156,9 @@ try {
   await touch(cdp, "touchEnd");
   assert.ok(scrolledTo < scrolledFrom - 100, `edge hold auto-scrolls the board (${scrolledFrom} -> ${scrolledTo})`);
 
-  // A library meal can be held and dragged onto the board; the page scrolls up to it.
-  await page.evaluate(() => { document.querySelector(".grid-scroll")!.scrollLeft = 0; window.scrollTo(0, document.documentElement.scrollHeight); });
-  await sleep(150);
-  const libraryMeal = (await page.locator(".library-chip").first().getAttribute("aria-label"))!.replace(/^Plan /, "");
-  const cardCount = await page.locator(".meal-chip[data-card-id]").count();
-  const pageBefore = await page.evaluate(() => scrollY);
-  const library = await center(page, ".library-chip");
-  await touch(cdp, "touchStart", library);
-  await sleep(550);
-  await slide(cdp, library, { x: 200, y: 20 }, 10);
-  let empty: (Point & { date: string; slot: string }) | null = null;
-  for (let attempt = 0; attempt < 150 && !empty; attempt++) {
-    await sleep(30);
-    empty = await page.evaluate(() => {
-      const cell = Array.from(document.querySelectorAll<HTMLElement>(".meal-cell")).find((td) => {
-        const box = td.getBoundingClientRect();
-        return td.dataset.slotId !== "unassigned" && !td.querySelector(".meal-chip") && box.top > 70 && box.bottom < innerHeight - 140 && box.left > 70 && box.right < innerWidth;
-      });
-      if (!cell) return null;
-      const box = cell.getBoundingClientRect();
-      return { x: box.left + box.width / 2, y: box.top + box.height / 2, date: cell.dataset.date!, slot: cell.dataset.slotId! };
-    });
-  }
-  assert.ok(empty, "dragging to the top edge scrolls the board into view");
-  assert.ok((await page.evaluate(() => scrollY)) < pageBefore, "page auto-scrolled upward");
-  await slide(cdp, { x: 200, y: 20 }, empty, 6);
-  assert.equal(await page.locator(`.meal-cell[data-date="${empty.date}"][data-slot-id="${empty.slot}"] .meal-chip-preview`).textContent(), libraryMeal, "library drop preview appears in the target cell");
-  await page.screenshot({ path: join(screenshots, "library-drag.png") });
-  await touch(cdp, "touchEnd");
-  await page.locator(`.meal-cell[data-date="${empty.date}"][data-slot-id="${empty.slot}"] .meal-chip[data-card-id]`).filter({ hasText: libraryMeal }).waitFor();
-  assert.equal(await page.locator(".meal-chip[data-card-id]").count(), cardCount + 1, "library touch drop plans exactly one meal");
-  assert.equal(await page.locator("dialog[open]").count(), 0, "library drop does not open the Plan dialog");
+  // Phones hide the library panel; the week fits the screen with no vertical scroll.
+  assert.equal(await page.locator(".library-list").isVisible(), false, "the library panel is hidden on phones");
+  assert.ok(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight), "the phone board fits without vertical scrolling");
 
   // Dropping a planned card on the pinned trash asks for confirmation.
   await page.waitForFunction(() => !document.querySelector(".meal-chip.is-sync-pending"));
@@ -209,10 +180,10 @@ try {
   await page.touchscreen.tap(tapCard.x, tapCard.y);
   await page.getByRole("dialog", { name: /^Move / }).waitFor();
   await page.keyboard.press("Escape");
-  await page.locator(".library-chip").first().scrollIntoViewIfNeeded();
-  const tapLibrary = await center(page, ".library-chip");
-  await page.touchscreen.tap(tapLibrary.x, tapLibrary.y);
-  await page.getByRole("dialog", { name: `Plan ${libraryMeal}` }).waitFor();
+  await page.evaluate(() => { document.querySelector(".grid-scroll")!.scrollLeft = 0; });
+  const tapAdd = await center(page, ".cell-add-button");
+  await page.touchscreen.tap(tapAdd.x, tapAdd.y);
+  await page.getByRole("dialog", { name: /^Add to / }).waitFor();
   await page.keyboard.press("Escape");
 
   // Once nothing is saving, the board stops polling twice a second.
@@ -222,6 +193,41 @@ try {
   page.on("request", (request) => { if (new URL(request.url()).pathname === "/api/board") boardPolls++; });
   await sleep(3000);
   assert.ok(boardPolls <= 1, `idle board polls slowly (${boardPolls} requests in 3s)`);
+
+  // Touch tablets wide enough for the library panel can hold and drag a library meal onto the board.
+  const tablet = await browser.newContext({ viewport: { width: 1024, height: 768 }, isMobile: true, hasTouch: true });
+  const pad = await tablet.newPage();
+  const padCdp = await tablet.newCDPSession(pad);
+  await pad.goto(origin);
+  await pad.getByLabel("Password", { exact: true }).fill(password);
+  await pad.getByRole("button", { name: "Sign in", exact: true }).click();
+  await pad.getByRole("button", { name: "Next week", exact: true }).click();
+  await pad.locator(".library-chip").first().waitFor();
+  const libraryMeal = (await pad.locator(".library-chip").first().getAttribute("aria-label"))!.replace(/^Plan /, "");
+  const cardCount = await pad.locator(".meal-chip[data-card-id]").count();
+  const empty = await pad.evaluate(() => {
+    const cell = Array.from(document.querySelectorAll<HTMLElement>(".meal-cell")).find((td) => {
+      const box = td.getBoundingClientRect();
+      return td.dataset.slotId !== "unassigned" && !td.querySelector(".meal-chip") && box.top > 0 && box.bottom < innerHeight && box.left > 0 && box.right < innerWidth;
+    })!;
+    const box = cell.getBoundingClientRect();
+    return { x: box.left + box.width / 2, y: box.top + box.height / 2, date: cell.dataset.date!, slot: cell.dataset.slotId! };
+  });
+  const library = await center(pad, ".library-chip");
+  await touch(padCdp, "touchStart", library);
+  await sleep(550);
+  await slide(padCdp, library, empty, 10);
+  assert.equal(await pad.locator(`.meal-cell[data-date="${empty.date}"][data-slot-id="${empty.slot}"] .meal-chip-preview`).textContent(), libraryMeal, "library drop preview appears in the target cell");
+  await pad.screenshot({ path: join(screenshots, "library-drag.png") });
+  await touch(padCdp, "touchEnd");
+  await pad.locator(`.meal-cell[data-date="${empty.date}"][data-slot-id="${empty.slot}"] .meal-chip[data-card-id]`).filter({ hasText: libraryMeal }).waitFor();
+  assert.equal(await pad.locator(".meal-chip[data-card-id]").count(), cardCount + 1, "library touch drop plans exactly one meal");
+  assert.equal(await pad.locator("dialog[open]").count(), 0, "library drop does not open the Plan dialog");
+  await sleep(500);
+  const tapLibrary = await center(pad, ".library-chip");
+  await pad.touchscreen.tap(tapLibrary.x, tapLibrary.y);
+  await pad.getByRole("dialog", { name: `Plan ${libraryMeal}` }).waitFor();
+  await tablet.close();
 
   console.log(`Mobile touch drag checks passed; screenshots in ${screenshots}`);
 } finally {

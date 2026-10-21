@@ -268,6 +268,54 @@ try {
     await small.close();
   }
 
+  // iPhone 12 mini in Safari (375×629 visible): four slots and a two-meal cell
+  // fit without vertical scrolling.
+  {
+    const mini = await browser.newContext({ viewport: { width: 375, height: 629 }, isMobile: true, hasTouch: true });
+    const page = await mini.newPage();
+    await login(page);
+    await page.evaluate(async () => {
+      const board = await (await fetch("/api/board")).json();
+      const slots = [...board.slots, { id: crypto.randomUUID(), name: "School snack", time: "16:00" }]
+        .sort((a: { time: string }, b: { time: string }) => a.time.localeCompare(b.time));
+      const response = await fetch("/api/settings/slots", { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": board.csrf }, body: JSON.stringify({ slots, revision: board.settings.revision }) });
+      if (!response.ok) throw new Error(`slot save failed: ${response.status}`);
+    });
+    await page.reload();
+    await page.getByRole("button", { name: "Next week", exact: true }).click();
+    assert.equal(await page.locator("tbody tr").count(), 4, "four slot rows");
+    const twoMeals = cell(page, 2, 2);
+    for (const index of [0, 1]) {
+      await twoMeals.locator(".cell-add-button").tap();
+      await addDialog(page).locator(".add-meal-options button").nth(index).tap();
+      await addDialog(page).waitFor({ state: "hidden" });
+    }
+    await page.waitForFunction(() => !document.querySelector(".meal-chip.is-sync-pending"));
+    await sleep(2200); // let the saved checks fade
+    const fit = await page.evaluate(() => ({
+      scroll: document.documentElement.scrollHeight,
+      height: innerHeight,
+      topbar: document.querySelector(".topbar")!.getBoundingClientRect().height,
+      lastRowBottom: Array.from(document.querySelectorAll("tbody tr")).at(-1)!.getBoundingClientRect().bottom,
+    }));
+    assert.ok(fit.scroll <= fit.height, `12 mini: no vertical scroll (${fit.scroll} <= ${fit.height})`);
+    assert.ok(fit.lastRowBottom <= fit.height, "12 mini: the last slot row is fully visible");
+    assert.ok(fit.topbar <= 60, `12 mini: one-row top bar (${fit.topbar}px)`);
+    const plusBox = (await twoMeals.locator(".cell-add-button").boundingBox())!;
+    assert.ok(plusBox.height >= 20, "the + in a two-meal cell stays tappable");
+    await page.screenshot({ path: join(screenshots, "iphone-12-mini.png") });
+
+    // Shuffle lives in the + dialog on phones.
+    await cell(page, 1, 1).locator(".cell-add-button").tap();
+    let shuffled = false;
+    page.on("request", (request) => { if (request.url().endsWith("/api/library/shuffle")) shuffled = true; });
+    await addDialog(page).getByRole("button", { name: "Shuffle meal library", exact: true }).tap();
+    await page.waitForFunction(() => !document.querySelector<HTMLButtonElement>(".add-meal-shuffle")?.disabled);
+    assert.ok(shuffled, "the dialog's shuffle reorders the library");
+    assert.ok(await addDialog(page).isVisible(), "shuffling keeps the dialog open");
+    await mini.close();
+  }
+
   console.log(`Cell + checks passed; screenshots in ${screenshots}`);
 } finally {
   await browser?.close();

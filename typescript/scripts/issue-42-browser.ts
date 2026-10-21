@@ -187,15 +187,16 @@ try {
   const scrollBox = await mobilePlanned.boundingBox();
   assert.ok(scrollBox);
   const cdp = await mobile.context().newCDPSession(mobile);
-  const beforeScroll = await mobile.evaluate(() => window.scrollY);
+  // The phone board fits the screen vertically, so a swipe on a card scrolls the days sideways.
+  const beforeScroll = await mobile.evaluate(() => document.querySelector(".grid-scroll")!.scrollLeft);
   await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: scrollBox.x + scrollBox.width / 2, y: scrollBox.y + scrollBox.height / 2, id: 1 }] });
   for (let step = 1; step <= 5; step++) {
-    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: scrollBox.x + scrollBox.width / 2, y: scrollBox.y + scrollBox.height / 2 - step * 22, id: 1 }] });
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: scrollBox.x + scrollBox.width / 2 - step * 22, y: scrollBox.y + scrollBox.height / 2, id: 1 }] });
   }
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   await mobile.waitForTimeout(100);
   assert.equal(await mobile.locator("dialog[open]").count(), 0, "scrolling a touch card does not open the dialog");
-  assert.ok((await mobile.evaluate(() => window.scrollY)) > beforeScroll, "touch scroll remains available on a planned card");
+  assert.ok((await mobile.evaluate(() => document.querySelector(".grid-scroll")!.scrollLeft)) > beforeScroll, "touch scroll remains available on a planned card");
   const trustedMoves = await mobile.evaluate(() => (window as unknown as { issue42TouchReport: { moves: boolean[] } }).issue42TouchReport.moves);
   assert.ok(trustedMoves.length > 0 && trustedMoves.every(Boolean), "mobile scroll uses trusted browser touch movement");
   await mobile.emulateMedia({ colorScheme: "dark" });

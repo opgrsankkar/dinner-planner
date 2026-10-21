@@ -85,6 +85,16 @@ async function placeViaDialog(
   await dialog.waitFor({ state: "hidden" });
 }
 
+// Phones plan from the cell's "+" (the library panel is hidden).
+async function placeViaCell(page: Page, name: string, date: string, slotId: string) {
+  await page
+    .locator(`.meal-cell[data-date="${date}"][data-slot-id="${slotId}"] .cell-add-button`)
+    .tap();
+  const dialog = page.getByRole("dialog", { name: /^Add to / });
+  await dialog.getByRole("button", { name, exact: true }).tap();
+  await dialog.waitFor({ state: "hidden" });
+}
+
 function chipAt(page: Page, date: string, slotId: string) {
   return page.locator(
     `.meal-cell[data-date="${date}"][data-slot-id="${slotId}"] .meal-chip`,
@@ -191,7 +201,7 @@ try {
   });
   const phone = await mobile.newPage();
   await login(phone);
-  await placeViaDialog(phone, names[0]!, pastDay!, breakfast);
+  await placeViaCell(phone, names[0]!, pastDay!, breakfast);
   await assertStruck(phone, pastDay!, breakfast, true);
   await chipAt(phone, pastDay!, breakfast)
     .first()

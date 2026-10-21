@@ -187,31 +187,29 @@ try {
   const scrollBox = await mobilePlanned.boundingBox();
   assert.ok(scrollBox);
   const cdp = await mobile.context().newCDPSession(mobile);
-  const beforeScroll = await mobile.evaluate(() => window.scrollY);
+  // The phone board fits the screen vertically, so a swipe on a card scrolls the days sideways.
+  const beforeScroll = await mobile.evaluate(() => document.querySelector(".grid-scroll")!.scrollLeft);
   await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: scrollBox.x + scrollBox.width / 2, y: scrollBox.y + scrollBox.height / 2, id: 1 }] });
   for (let step = 1; step <= 5; step++) {
-    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: scrollBox.x + scrollBox.width / 2, y: scrollBox.y + scrollBox.height / 2 - step * 22, id: 1 }] });
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: scrollBox.x + scrollBox.width / 2 - step * 22, y: scrollBox.y + scrollBox.height / 2, id: 1 }] });
   }
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   await mobile.waitForTimeout(100);
   assert.equal(await mobile.locator("dialog[open]").count(), 0, "scrolling a touch card does not open the dialog");
-  assert.ok((await mobile.evaluate(() => window.scrollY)) > beforeScroll, "touch scroll remains available on a planned card");
+  assert.ok((await mobile.evaluate(() => document.querySelector(".grid-scroll")!.scrollLeft)) > beforeScroll, "touch scroll remains available on a planned card");
   const trustedMoves = await mobile.evaluate(() => (window as unknown as { issue42TouchReport: { moves: boolean[] } }).issue42TouchReport.moves);
   assert.ok(trustedMoves.length > 0 && trustedMoves.every(Boolean), "mobile scroll uses trusted browser touch movement");
 
   // A hold followed by movement starts a touch drag. Use a tall phone viewport
   // so the calendar and its trash target are both reachable without page auto-scroll.
-  const libraryButtons = mobile.locator(".library-chip");
-  let touchMealIndex = 0;
-  let touchMealName = (await libraryButtons.nth(touchMealIndex).innerText()).replace("⠿", "").trim();
-  if (touchMealName === plannedName) {
-    touchMealIndex++;
-    touchMealName = (await libraryButtons.nth(touchMealIndex).innerText()).replace("⠿", "").trim();
-  }
-  await libraryButtons.nth(touchMealIndex).click();
-  const touchPlanDialog = mobile.getByRole("dialog", { name: `Plan ${touchMealName}` });
+  // Phones plan from a cell's "+"; use next week's first slot so it is never past.
+  await mobile.getByRole("button", { name: "Next week", exact: true }).click();
+  await mobile.locator("tbody tr:first-child .meal-cell").first().locator(".cell-add-button").click();
+  const touchPlanDialog = mobile.getByRole("dialog", { name: /^Add to / });
   await touchPlanDialog.waitFor();
-  await mobile.getByRole("button", { name: "Plan meal", exact: true }).click();
+  const touchOptions = await touchPlanDialog.locator(".add-meal-options button").allInnerTexts();
+  const touchMealName = touchOptions.find((name) => name !== plannedName)!;
+  await touchPlanDialog.getByRole("button", { name: touchMealName, exact: true }).click();
   await mobile.getByRole("status", { name: "Meal saved", exact: true }).waitFor();
   await mobile.setViewportSize({ width: 390, height: 1500 });
   const touchPlanned = mobile.locator(".meal-chip").filter({ hasText: touchMealName });
