@@ -41,3 +41,10 @@ This is a single-user pet project for experimenting, not a production-hardening 
 - Before live cutover, take a consistent SQLite backup, retain the old deployable artifact/configuration, and use a practical data-preserving migration/restore plan. Ensure only one active Todoist mutation worker operates across the cutover. No elaborate enterprise stability programme is required.
 - User has authorized the full migration, required project PR publication, merge, and deployment. Do not wait for their routine code review or ask for approval at every milestone. Escalate only genuine blockers, destructive deviations, or significant product decisions.
 - Verify remote writes with exact GitHub read-back. Verify deployment via live health/authenticated browser behavior, not build output alone. Report what actually works, review outcome, deployed revision, and any remaining limitation.
+
+## Publishing and deploying
+
+1. Push the branch and open the PR as the repository owner's GitHub account (`opgrsankkar`); other logged-in `gh` accounts may lack push access. Merge once your own checks pass (no CI is configured).
+2. The live checkout is `/srv/apps/homelab/compose/dinner-planner` (also reachable as `/srv/homelab/compose/dinner-planner`), kept at a detached HEAD. Note the current SHA for rollback, then `git fetch origin master` and `git checkout --detach <merged SHA>` there.
+3. In that directory run `sudo docker compose up -d --build`. Do not read or edit `.env`, `secrets/`, or `data/`.
+4. Confirm `sudo docker inspect -f '{{.State.Health.Status}}' dinner-planner` reports `healthy`, `https://meals.happydaysblr.ddns.net/healthz` returns 200, and the live assets contain the change. Roll back by checking out the previous SHA and rebuilding.
