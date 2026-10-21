@@ -36,6 +36,24 @@ export function AddMealDialog({
     // On phones, focusing the search would cover the list with the keyboard.
     (focusSearch ? searchInput.current : heading.current)?.focus();
   }, [target, focusSearch]);
+  // iOS keeps the page height when the keyboard opens and only shrinks the
+  // visual viewport; size the dialog to what is actually visible.
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const node = dialog.current;
+    if (!target || !viewport || !node) return;
+    const fit = () => {
+      node.style.setProperty("--visible-height", `${viewport.height}px`);
+      node.style.setProperty("--visible-top", `${viewport.offsetTop}px`);
+    };
+    fit();
+    viewport.addEventListener("resize", fit);
+    viewport.addEventListener("scroll", fit);
+    return () => {
+      viewport.removeEventListener("resize", fit);
+      viewport.removeEventListener("scroll", fit);
+    };
+  }, [target]);
   const query = search.trim();
   const matches = meals.filter((meal) => meal.name.toLowerCase().includes(query.toLowerCase()));
   const canCreate = !!query && !meals.some((meal) => meal.name.trim().toLowerCase() === query.toLowerCase());
@@ -69,15 +87,22 @@ export function AddMealDialog({
       aria-labelledby="add-meal-title"
       onKeyDown={onKeyDown}
       onClose={onClose}
+      onClick={(e) => {
+        // Tapping the backdrop closes the dialog.
+        if (e.target !== e.currentTarget) return;
+        const box = e.currentTarget.getBoundingClientRect();
+        if (e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom)
+          e.currentTarget.close();
+      }}
     >
-      <form className="planner-action-form" onSubmit={submit}>
+      <form className="planner-action-form add-meal-form" onSubmit={submit}>
         <h2 id="add-meal-title" tabIndex={-1} ref={heading}>
           Add to {target?.label}
         </h2>
         {target?.past && (
           <p className="add-meal-note">This time has passed, so the meal will be marked as done.</p>
         )}
-        <label htmlFor="add-meal-search">Meal</label>
+        <label htmlFor="add-meal-search" className="visually-hidden">Meal</label>
         <input
           id="add-meal-search"
           ref={searchInput}
@@ -91,13 +116,8 @@ export function AddMealDialog({
             setError("");
           }}
         />
-        {canCreate && (
-          <button className="primary-button add-meal-create" type="submit" disabled={creating}>
-            {creating ? "Adding…" : `Add “${query}” and plan it`}
-          </button>
-        )}
         {error && <p className="add-meal-error" role="alert">{error}</p>}
-        {matches.length > 0 ? (
+        {matches.length > 0 || canCreate ? (
           <ul className="add-meal-options" aria-label="Meal library">
             {matches.map((meal) => (
               <li key={meal.id}>
@@ -106,9 +126,16 @@ export function AddMealDialog({
                 </button>
               </li>
             ))}
+            {canCreate && (
+              <li>
+                <button className="add-meal-create" type="submit" disabled={creating}>
+                  {creating ? "Adding…" : `+ Add “${query}” and plan it`}
+                </button>
+              </li>
+            )}
           </ul>
         ) : (
-          !query && <p className="add-meal-note">Type a meal name to add it.</p>
+          <p className="add-meal-note">Type a meal name to add it.</p>
         )}
         <div className="dialog-actions">
           <button className="secondary-button" type="button" onClick={() => dialog.current?.close()}>
