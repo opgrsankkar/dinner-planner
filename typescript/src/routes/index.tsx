@@ -430,13 +430,29 @@ export function Planner() {
     } catch {
       sessionStorage.removeItem("planner-pending-http");
     }
-    const update = () => {
-      void refresh().catch((e) => setError(String(e.message)));
-    };
-    update();
-    const timer = setInterval(update, 500);
-    return () => clearInterval(timer);
+    void refresh().catch((e) => setError(String(e.message)));
   }, [refresh]);
+  // Poll quickly only while a meal is saving or showing its check; otherwise
+  // the server's Todoist cache (15s+) makes faster polling pointless.
+  const syncing = !!board?.cards.some(
+    (card) => card.state === "pending" || now - card.confirmedAt < 2000,
+  );
+  useEffect(() => {
+    const update = () => {
+      if (!document.hidden) void refresh().catch((e) => setError(String(e.message)));
+    };
+    const timer = setInterval(update, syncing ? 500 : 15000);
+    const visible = () => {
+      if (!document.hidden) update();
+    };
+    document.addEventListener("visibilitychange", visible);
+    window.addEventListener("focus", visible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", visible);
+      window.removeEventListener("focus", visible);
+    };
+  }, [refresh, syncing]);
   useEffect(() => {
     if (board) setTheme(board.settings.theme);
   }, [board?.settings.theme]);
