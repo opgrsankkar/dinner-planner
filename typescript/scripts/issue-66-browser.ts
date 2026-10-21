@@ -215,6 +215,8 @@ try {
   await mobile.getByRole("status", { name: "Meal saved", exact: true }).waitFor();
   await mobile.setViewportSize({ width: 390, height: 1500 });
   const touchPlanned = mobile.locator(".meal-chip").filter({ hasText: touchMealName });
+  // "Meal saved" can belong to an earlier card; only a saved card can be dragged.
+  await mobile.locator(".meal-chip[role=button]").filter({ hasText: touchMealName }).waitFor();
   await touchPlanned.evaluate((node) => node.scrollIntoView({ block: "center" }));
   await mobile.emulateMedia({ colorScheme: "dark" });
   await mobile.waitForFunction(() => document.documentElement.dataset.theme === "dark");
@@ -323,9 +325,10 @@ try {
     await mobile.waitForTimeout(600);
     assert.equal(await mobile.locator("body").evaluate((node) => node.classList.contains("planner-dragging")), true);
   };
-  const trashBox = await mobile.locator(".trash-drop-target").boundingBox();
-  assert.ok(trashBox);
   await beginHeldTouch();
+  // During a touch drag the trash is pinned inside the viewport, so measure it after the hold.
+  const trashBox = await mobile.locator(".trash-drop-target").boundingBox();
+  assert.ok(trashBox && trashBox.y >= 0 && trashBox.y + trashBox.height <= (mobile.viewportSize()?.height ?? 0), "touch-drag trash is on screen");
   await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: trashBox.x + trashBox.width / 2, y: trashBox.y + trashBox.height / 2, id: 3 }] });
   assert.equal(await mobile.locator("body").evaluate((node) => node.classList.contains("trash-hover")), true);
   await mobile.keyboard.press("Escape");

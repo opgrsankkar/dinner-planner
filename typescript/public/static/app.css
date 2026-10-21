@@ -299,7 +299,11 @@ html[data-theme=dark] .library-feedback[role=alert]{color:#ff8c9c}
 .folio-account .folio-logout-button:focus-visible{outline:3px solid var(--ink);outline-offset:5px;}
 .folio-account .folio-logout-button:disabled{opacity:.65;cursor:wait;}
 
-@media(hover:none){.meal-chip[role=button]{touch-action:none;cursor:pointer;user-select:none;-webkit-user-select:none}.meal-chip[role=button].is-touch-dragging{opacity:.58;transform:scale(.96);box-shadow:0 0 0 2px var(--green)}}.meal-cell.touch-drop-hover,.meal-cell.drag-drop-hover{background:var(--green-soft);box-shadow:inset 0 0 0 2px var(--green)}
+/* Touch drag: hold a card or library meal ~0.4s, then drag. Before the hold the browser scrolls natively. */
+@media(hover:none){.meal-chip[role=button],.library-chip{touch-action:manipulation;cursor:pointer;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}}.meal-chip[role=button].is-touch-dragging,.library-chip.is-touch-dragging{opacity:.58;transform:scale(.96);box-shadow:0 0 0 2px var(--green)}.meal-cell.touch-drop-hover,.meal-cell.drag-drop-hover{background:var(--green-soft);box-shadow:inset 0 0 0 2px var(--green)}
+.touch-drag-ghost{position:fixed;left:0;top:0;z-index:1000;pointer-events:none;display:flex;align-items:center;min-height:27px;padding:7px 6px;border:1px solid var(--green);border-radius:5px;background:var(--mint);color:var(--ink);font-size:12px;font-weight:600;line-height:1.3;overflow-wrap:anywhere;box-shadow:0 10px 24px rgba(20,45,31,.24);opacity:.96;rotate:-2deg}
+/* The library (and its trash) sits below the board on phones; pin trash to the viewport while touch-dragging. */
+.touch-dragging .trash-drop-target{position:fixed;z-index:30;top:calc(100dvh - 72px - env(safe-area-inset-bottom));width:96px;height:96px;border-radius:22px}.touch-dragging .trash-drop-target>.ui-icon{width:44px;height:44px}.touch-dragging{-webkit-user-select:none;user-select:none}
 /* Mouse drag ghost: a dashed Folio outline of the library meal in the destination cell. */
 .meal-chip-preview{border-style:dashed;border-color:var(--green);background:color-mix(in srgb,var(--surface) 58%,transparent);color:var(--muted);box-shadow:none;pointer-events:none;opacity:.9}
 .meal-chip-preview:hover{transform:none;box-shadow:none}
