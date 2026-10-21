@@ -97,7 +97,7 @@ try {
     const page = await context.newPage();
     await login(page);
     const cssHref = await page.locator('link[rel="stylesheet"]').first().getAttribute("href");
-    assert.match(cssHref ?? "", /app\.css\?v=issue76/, "planner loads the versioned stylesheet");
+    assert.match(cssHref ?? "", /app\.css\?v=[0-9a-f]{10}$/, "planner loads the content-versioned stylesheet");
 
     const names = await page.locator(".library-chip-name").allTextContents();
     assert.ok(names.length >= 3, "seeded library is available");

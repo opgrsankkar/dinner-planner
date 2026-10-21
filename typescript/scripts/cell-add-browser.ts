@@ -301,6 +301,23 @@ try {
     assert.ok(fit.scroll <= fit.height, `12 mini: no vertical scroll (${fit.scroll} <= ${fit.height})`);
     assert.ok(fit.lastRowBottom <= fit.height, "12 mini: the last slot row is fully visible");
     assert.ok(fit.topbar <= 60, `12 mini: one-row top bar (${fit.topbar}px)`);
+    // Safari sizes vh to the screen with its toolbars hidden, taller than what is
+    // visible with them shown; a vh-sized page scrolls into empty space on iPhones.
+    const largeViewportSizes = await page.evaluate(() => {
+      const chain: Element[] = [];
+      for (let node: Element | null = document.querySelector(".meal-grid"); node; node = node.parentElement) chain.push(node);
+      const rules: CSSRule[] = Array.from(document.styleSheets).flatMap((sheet) => Array.from(sheet.cssRules));
+      const found: string[] = [];
+      while (rules.length) {
+        const rule = rules.pop()!;
+        if (rule instanceof CSSMediaRule && matchMedia(rule.conditionText).matches) rules.push(...Array.from(rule.cssRules));
+        if (!(rule instanceof CSSStyleRule) || !chain.some((node) => node.matches(rule.selectorText))) continue;
+        const sizes = `${rule.style.height} ${rule.style.minHeight} ${rule.style.maxHeight}`;
+        if (/\dl?vh\b/.test(sizes)) found.push(`${rule.selectorText} { ${sizes.trim()} }`);
+      }
+      return found;
+    });
+    assert.deepEqual(largeViewportSizes, [], "nothing around the board is sized in vh");
     const plusBox = (await twoMeals.locator(".cell-add-button").boundingBox())!;
     assert.ok(plusBox.height >= 20, "the + in a two-meal cell stays tappable");
     await page.screenshot({ path: join(screenshots, "iphone-12-mini.png") });
