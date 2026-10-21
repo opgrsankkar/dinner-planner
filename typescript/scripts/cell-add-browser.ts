@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { chromium, type Browser, type Page } from "@playwright/test";
+import { chromium, webkit, type Browser, type Page } from "@playwright/test";
 
 const root = resolve(import.meta.dirname, "..");
 const directory = await mkdtemp(join(tmpdir(), "planner-cell-add-"));
@@ -33,6 +33,7 @@ const server = spawn(process.execPath, ["scripts/serve.mjs"], {
   },
 });
 let browser: Browser | undefined;
+let safari: Browser | undefined;
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
 async function waitForServer() {
@@ -95,7 +96,8 @@ try {
   await dialog.waitFor();
   const newMeal = `Cell meal ${crypto.randomUUID().slice(0, 6)}`;
   await desktop.locator("#add-meal-search").fill(newMeal);
-  assert.equal(await dialog.locator(".add-meal-options").count(), 0, "no library match for a new name");
+  assert.equal(await dialog.locator(".add-meal-options button:not(.add-meal-create)").count(), 0, "no library match for a new name");
+  assert.equal(await dialog.locator(".add-meal-create").innerText(), `+ Add “${newMeal}” and plan it`);
   await desktop.keyboard.press("Enter");
   await dialog.waitFor({ state: "hidden" });
   await target.locator(".meal-chip[data-card-id]").filter({ hasText: newMeal }).waitFor();
@@ -162,8 +164,94 @@ try {
   await phoneDialog.waitFor({ state: "hidden" });
   await phoneTarget.locator(".meal-chip[data-card-id]").filter({ hasText: optionName }).waitFor();
 
+  // Small phones with the keyboard open. iOS keeps the page height and only
+  // shrinks the visual viewport, so emulate exactly that.
+  const csrf = await phone.evaluate(async () => (await (await fetch("/api/board")).json()).csrf as string);
+  for (let index = 1; index <= 20; index++)
+    await phone.evaluate(async ({ csrf, name }) => {
+      await fetch("/api/library", { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf }, body: JSON.stringify({ name }) });
+    }, { csrf, name: `Extra meal ${index}` });
+  // 375px runs in WebKit (Safari's engine) and dark mode.
+  safari = await webkit.launch();
+  for (const size of [{ width: 320, height: 568 }, { width: 375, height: 667 }]) {
+    const engine: Browser = size.width === 375 ? safari : browser;
+    const small = await engine.newContext({ viewport: size, isMobile: true, hasTouch: true, colorScheme: size.width === 375 ? "dark" : "light" });
+    await small.addInitScript("window.__name = (fn) => fn;"); // tsx keeps function names via __name.
+    await small.addInitScript(() => {
+      const viewport = window.visualViewport!;
+      const fake = window as unknown as { keyboard: number };
+      fake.keyboard = 0;
+      Object.defineProperty(viewport, "height", { get: () => innerHeight - fake.keyboard });
+      Object.defineProperty(viewport, "offsetTop", { get: () => 0 });
+    });
+    const page = await small.newPage();
+    await login(page);
+    await page.getByRole("button", { name: "Next week", exact: true }).click();
+    const plus = (await cell(page, 2, 1).locator(".cell-add-button").boundingBox())!;
+    await page.touchscreen.tap(plus.x + plus.width / 2, plus.y + plus.height / 2);
+    const smallDialog = addDialog(page);
+    await smallDialog.waitFor();
+    const search = page.locator("#add-meal-search");
+    assert.ok((await search.evaluate((node) => parseFloat(getComputedStyle(node).fontSize))) >= 16, "search is >=16px so iOS does not zoom");
+    assert.equal(await search.evaluate((node) => getComputedStyle(node).appearance), "none", "no native search styling");
+    const searchBox = (await search.boundingBox())!;
+    await page.touchscreen.tap(searchBox.x + 20, searchBox.y + searchBox.height / 2);
+    const keyboard = Math.round(size.height * 0.45);
+    await page.evaluate((height) => {
+      (window as unknown as { keyboard: number }).keyboard = height;
+      window.visualViewport!.dispatchEvent(new Event("resize"));
+      const cover = document.createElement("div");
+      cover.id = "fake-keyboard";
+      cover.style.cssText = `position:fixed;left:0;right:0;bottom:0;height:${height}px;background:#333;z-index:2147483647;pointer-events:none`;
+      document.body.append(cover);
+    }, keyboard);
+    await search.fill("e");
+    const visible = size.height - keyboard;
+    const layout = await page.evaluate(() => {
+      const [dialog, search, cancel, list, first] = [
+        ".add-meal-dialog",
+        "#add-meal-search",
+        ".add-meal-dialog .dialog-actions button",
+        ".add-meal-options",
+        ".add-meal-options li:first-child button",
+      ].map((selector) => document.querySelector(selector)!.getBoundingClientRect());
+      const options = document.querySelector<HTMLElement>(".add-meal-options")!;
+      return { dialog, search, cancel, list, first, scrolls: options.scrollHeight > options.clientHeight };
+    });
+    assert.ok(layout.dialog.top >= 0 && layout.dialog.bottom <= visible + 1, `${size.width}px: dialog fits above the keyboard (${layout.dialog.bottom} <= ${visible})`);
+    assert.ok(layout.search.bottom <= visible && layout.cancel.bottom <= visible, `${size.width}px: search and Cancel stay visible`);
+    assert.ok(layout.search.height >= 40, `${size.width}px: search keeps its height (${layout.search.height})`);
+    assert.ok(layout.list.height >= 88, `${size.width}px: at least two options fit (${layout.list.height})`);
+    assert.ok(layout.first.top >= layout.list.top && layout.first.bottom <= Math.min(layout.list.bottom, visible), `${size.width}px: matches are visible`);
+    assert.ok(layout.scrolls, `${size.width}px: a long list scrolls inside the dialog`);
+    await page.screenshot({ path: join(screenshots, `phone-${size.width}-keyboard.png`) });
+
+    // Existing matches come first; creating a new name is the last option.
+    await search.fill("Sambar");
+    const options = await smallDialog.locator(".add-meal-options button").allInnerTexts();
+    assert.equal(options.at(-1), "+ Add “Sambar” and plan it", "create is the last option");
+    assert.ok(options.slice(0, -1).some((name) => /sambar/i.test(name)), "matching meals are listed before create");
+    const createBox = (await smallDialog.locator(".add-meal-create").boundingBox())!;
+    assert.ok(createBox.y + createBox.height <= visible, `${size.width}px: create option is visible`);
+    await page.screenshot({ path: join(screenshots, `phone-${size.width}-sambar.png`) });
+
+    // Keyboard closed: tapping the backdrop below the dialog closes it.
+    await page.evaluate(() => {
+      (window as unknown as { keyboard: number }).keyboard = 0;
+      window.visualViewport!.dispatchEvent(new Event("resize"));
+      document.getElementById("fake-keyboard")?.remove();
+    });
+    await search.fill("Sambar");
+    const dialogBox = (await page.locator(".add-meal-dialog").boundingBox())!;
+    assert.ok(dialogBox.y + dialogBox.height < size.height - 10, "a short dialog leaves backdrop below it");
+    await page.touchscreen.tap(size.width / 2, size.height - 5);
+    await smallDialog.waitFor({ state: "hidden" });
+    await small.close();
+  }
+
   console.log(`Cell + checks passed; screenshots in ${screenshots}`);
 } finally {
   await browser?.close();
+  await safari?.close();
   server.kill();
 }
