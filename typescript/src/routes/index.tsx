@@ -2,6 +2,7 @@ import { createFileRoute, useLocation } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { SettingsPage } from "../settings";
 import { WeekPicker } from "../WeekPicker";
+import { AddMealDialog, type CellTarget } from "../AddMealDialog";
 import type { Board, Meal, Card, Slot } from "../types";
 import { defaultPlanPlacement } from "../plan-default";
 import { orderLibrary } from "../library-order";
@@ -67,7 +68,7 @@ function containDialogTab(event: ReactKeyboardEvent<HTMLDialogElement>) {
   const active = document.activeElement;
   if (
     event.shiftKey &&
-    (active === first || active === dialog || active?.id === "plan-title")
+    (active === first || active === dialog || active?.tagName === "H2")
   ) {
     event.preventDefault();
     last.focus();
@@ -378,6 +379,7 @@ export function Planner() {
   const deleteDialog = useRef<HTMLDialogElement>(null);
   const dialogTrigger = useRef<HTMLElement | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Card | null>(null);
+  const [cellTarget, setCellTarget] = useState<CellTarget | null>(null);
   const local = useRef(new Map<string, Card>());
   const intents = useRef(new Map<string, Intent>());
   function persistIntents() {
@@ -658,6 +660,16 @@ export function Planner() {
     setSlotId(card.slotId ?? board!.slots[0].id);
     setPlanDefaultAvailable(true);
     dialog.current?.showModal();
+  }
+  function openCellAdd(date: string, label: string, slot: Slot, trigger: HTMLButtonElement) {
+    dialogTrigger.current = trigger;
+    setCellTarget({ date, label, slot, past: isPastSlot(date, slot.time) });
+  }
+  async function createLibraryMeal(name: string) {
+    const added = (await post("/api/library", { name })) as Meal;
+    setRecentMeals((previous) => [added.id, ...previous.filter((id) => id !== added.id)]);
+    void refresh().catch((e) => setError(String(e.message)));
+    return added;
   }
   function requestDelete(card: Card) {
     setDeleteTarget(card);
@@ -1074,6 +1086,16 @@ export function Planner() {
                                   </span>
                                 </div>
                               )}
+                            {slot.id !== "unassigned" && (
+                              <button
+                                type="button"
+                                className="cell-add-button"
+                                aria-label={`Add a meal to ${d.name}, ${d.label} · ${slot.name}`}
+                                onClick={(e) => openCellAdd(d.iso, `${d.name}, ${d.label} · ${slot.name}`, slot, e.currentTarget)}
+                              >
+                                <span aria-hidden="true">+</span>
+                              </button>
+                            )}
                           </div>
                         </td>
                       ))}
@@ -1205,6 +1227,18 @@ export function Planner() {
           </aside>
         </main>
       )}
+      <AddMealDialog
+        target={cellTarget}
+        meals={orderLibrary(board.library, recentMeals)}
+        focusSearch={!coarsePointer}
+        onPick={(meal, picked) => void place(meal, picked.date, picked.slot)}
+        onCreate={createLibraryMeal}
+        onClose={() => {
+          setCellTarget(null);
+          dialogTrigger.current?.focus();
+        }}
+        onKeyDown={containDialogTab}
+      />
       <dialog
         ref={deleteDialog}
         className="confirm-dialog"

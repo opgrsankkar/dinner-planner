@@ -25,6 +25,7 @@
     "smoke:issue-78": "tsx scripts/issue-78-browser.ts",
     "smoke:delete-confirm": "tsx scripts/delete-after-confirm-browser.ts",
     "smoke:mobile-touch-dnd": "tsx scripts/mobile-touch-dnd-browser.ts",
+    "smoke:cell-add": "tsx scripts/cell-add-browser.ts",
     "check:runtime": "node --import tsx scripts/runtime-check.ts",
     "demo": "mkdir -p .local && npm run db:init && npm run dev",
     "start": "node scripts/serve.mjs",
