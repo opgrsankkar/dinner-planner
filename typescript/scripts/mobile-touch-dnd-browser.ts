@@ -216,6 +216,14 @@ try {
   await page.getByRole("dialog", { name: `Plan ${libraryMeal}` }).waitFor();
   await page.keyboard.press("Escape");
 
+  // Once nothing is saving, the board stops polling twice a second.
+  await page.waitForFunction(() => !document.querySelector(".meal-chip.is-sync-pending, .meal-sync-indicator[role=status]"));
+  await sleep(600);
+  let boardPolls = 0;
+  page.on("request", (request) => { if (new URL(request.url()).pathname === "/api/board") boardPolls++; });
+  await sleep(3000);
+  assert.ok(boardPolls <= 1, `idle board polls slowly (${boardPolls} requests in 3s)`);
+
   console.log(`Mobile touch drag checks passed; screenshots in ${screenshots}`);
 } finally {
   await browser?.close();
