@@ -203,8 +203,7 @@ try {
   await page.getByRole("dialog", { name: "Confirm meal deletion" }).waitFor();
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
 
-  // Taps still open the non-drag alternatives (after the brief post-drop click guard).
-  await sleep(500);
+  // Taps still open the non-drag alternatives, even straight after a drop.
   await showCard(page, trashCard);
   const tapCard = await center(page, `[data-card-id="${trashCard}"]`);
   await page.touchscreen.tap(tapCard.x, tapCard.y);
