@@ -305,6 +305,28 @@ try {
     assert.ok(plusBox.height >= 20, "the + in a two-meal cell stays tappable");
     await page.screenshot({ path: join(screenshots, "iphone-12-mini.png") });
 
+    // Device fonts differ (Safari renders the top bar ~75px and day headers ~61px):
+    // the rows are sized from measured heights, so the week still fits.
+    await page.addStyleTag({ content: ".topbar:not(.settings-topbar){height:75px!important}.meal-grid thead th{height:61px!important}.day-header-content{height:61px!important}" });
+    await sleep(300);
+    const tallFonts = await page.evaluate(() => ({ scroll: document.documentElement.scrollHeight, height: innerHeight, topbar: document.querySelector(".topbar")!.getBoundingClientRect().height }));
+    assert.equal(tallFonts.topbar, 75);
+    assert.ok(tallFonts.scroll <= tallFonts.height, `taller device fonts still fit (${tallFonts.scroll} <= ${tallFonts.height})`);
+    await page.reload();
+    await page.getByRole("button", { name: "Next week", exact: true }).click();
+
+    // Slot labels are frozen while the days scroll sideways, and wrap left-aligned.
+    const grid = page.locator(".grid-scroll");
+    const labelLeft = async () => (await page.locator(".slot-label").first().boundingBox())!.x;
+    const before = await labelLeft();
+    await grid.evaluate((node) => { node.scrollLeft = 300; });
+    await sleep(100);
+    assert.ok(await grid.evaluate((node) => node.scrollLeft) > 200, "the days scrolled");
+    assert.equal(Math.round(await labelLeft()), Math.round(before), "slot labels stay frozen");
+    assert.equal(await page.locator(".slot-label").first().evaluate((node) => getComputedStyle(node).textAlign), "left");
+    await page.screenshot({ path: join(screenshots, "iphone-12-mini-scrolled.png") });
+    await grid.evaluate((node) => { node.scrollLeft = 0; });
+
     // Shuffle lives in the + dialog on phones.
     await cell(page, 1, 1).locator(".cell-add-button").tap();
     let shuffled = false;
@@ -313,6 +335,17 @@ try {
     await page.waitForFunction(() => !document.querySelector<HTMLButtonElement>(".add-meal-shuffle")?.disabled);
     assert.ok(shuffled, "the dialog's shuffle reorders the library");
     assert.ok(await addDialog(page).isVisible(), "shuffling keeps the dialog open");
+    await page.keyboard.press("Escape");
+
+    // iOS zooms the page when a focused field is under 16px; no field may trigger it.
+    await page.getByRole("link", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Meal slots", exact: true }).click();
+    await page.locator(".slot-time").first().waitFor();
+    const fieldSizes = await page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>("input:not([type=radio]),select,textarea")).map((el) => parseFloat(getComputedStyle(el).fontSize)),
+    );
+    assert.ok(fieldSizes.length > 0 && fieldSizes.every((size) => size >= 16), `touch form fields are >=16px (${fieldSizes.join(",")})`);
+    await page.screenshot({ path: join(screenshots, "iphone-12-mini-slots.png") });
     await mini.close();
   }
 

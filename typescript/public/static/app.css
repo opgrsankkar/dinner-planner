@@ -358,8 +358,12 @@ html[data-theme=dark] .add-meal-error{color:#ff8c9c}
 .day-date{font-size:11px}
 .day-name{font-size:15px}
 .day-count{top:3px;right:3px;min-width:18px;height:18px;padding:0 4px;font-size:10px}
-/* 56px top bar + 4px gap + 49px day headers (with borders) + 4px slack. */
+/* First paint estimate; the planner then sets a measured --row on each slot row. */
 .meal-grid{--row:max(84px,calc((100svh - 113px) / var(--slot-rows,3)))}
+/* Slot labels stay put while the days scroll sideways, and wrap left-aligned. */
+.meal-grid{overflow:clip} /* overflow:hidden would make the table the sticky container */
+.grid-corner,.slot-label{position:sticky;left:0;z-index:3;background:var(--paper);box-shadow:inset -1px 0 0 var(--line)}
+.slot-label{text-align:left}
 .meal-grid tbody tr,.meal-cell{height:var(--row)}
 .meal-cell-content{min-height:calc(var(--row) - 12px)}
 /* Two two-line meals plus the "+" fit a slot row at 12 mini height. */
@@ -367,3 +371,7 @@ html[data-theme=dark] .add-meal-error{color:#ff8c9c}
 .meal-grid .meal-chip-name{line-height:1.25}
 .cell-add-button{flex-basis:20px;min-height:20px}
 }
+
+/* iOS zooms the whole page when a focused field's text is under 16px, and the
+   zoom persists across the planner/settings navigation; keep fields at 16px. */
+@media(pointer:coarse){input,select,textarea{font-size:16px!important}}

@@ -133,8 +133,15 @@ try {
         const primaryBackground = await dialog.getByRole("button", { name: "Move meal", exact: true }).evaluate((button) => getComputedStyle(button).backgroundColor);
         assert.notEqual(appearance.background, primaryBackground, `${width}px ${theme}: destructive treatment differs from primary action`);
         await remove.hover();
-        const hover = await remove.evaluate((button) => getComputedStyle(button).transform);
-        assert.notEqual(hover, "none", `${width}px ${theme}: delete action has hover feedback`);
+        // The hover style animates in; give the transition a moment to start.
+        const hovered = await remove.evaluate(async (button) => {
+          for (const started = performance.now(); performance.now() - started < 1000; ) {
+            if (getComputedStyle(button).transform !== "none") return true;
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+          }
+          return false;
+        });
+        assert.ok(hovered, `${width}px ${theme}: delete action has hover feedback`);
       }
       await context.close();
     }
