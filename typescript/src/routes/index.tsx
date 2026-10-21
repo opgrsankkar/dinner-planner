@@ -970,6 +970,8 @@ export function Planner() {
                                     !card.completed &&
                                     !coarsePointer
                                   }
+                                  // A drag's leftover click has no new press; a deliberate tap does.
+                                  onPointerDown={() => { dragFinishedCardId.current = null; }}
                                   onTouchStart={(e) => startTouchDrag({ kind: "planned", card }, e.currentTarget, e)}
                                   onClick={(e) => {
                                     if (
