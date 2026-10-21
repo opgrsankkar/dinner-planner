@@ -1,14 +1,20 @@
 import { DatabaseSync } from "node:sqlite";
 import { createHash, randomUUID } from "node:crypto";
 import type { Placement, RemoteMeal } from "../types";
-// X-Request-Id deduplication is global to a Todoist token, so the close request
-// must not reuse the create request's ID or it can be suppressed as a duplicate.
-// Derive a distinct, stable, UUID-shaped key per stage from the create ID so
-// every retry reuses exactly the same completion key.
+// X-Request-Id deduplication is global to a Todoist token, so the close/reopen
+// requests must not reuse the operation's ID or they can be suppressed as
+// duplicates. Derive a distinct, stable, UUID-shaped key per stage from the
+// operation ID so every retry reuses exactly the same key.
 export function completionRequestId(createRequestId: string): string {
+  return stageRequestId("close", createRequestId);
+}
+export function reopenRequestId(requestId: string): string {
+  return stageRequestId("reopen", requestId);
+}
+function stageRequestId(stage: string, createRequestId: string): string {
   const derive = (salt: number) =>
     createHash("sha256")
-      .update(`meal-planner-close:${salt}:${createRequestId}`)
+      .update(`meal-planner-${stage}:${salt}:${createRequestId}`)
       .digest("hex")
       .slice(0, 32);
   let hex = derive(0);
@@ -21,7 +27,7 @@ export function completionRequestId(createRequestId: string): string {
     if (uuid !== createRequestId) return uuid;
     hex = derive(salt);
   }
-  throw new Error("Could not derive a distinct completion request ID");
+  throw new Error(`Could not derive a distinct ${stage} request ID`);
 }
 // Providers enforce task project ownership before writes, durable request-ID
 // idempotency, and delete success/404 acknowledgement without a follow-up read.
@@ -39,6 +45,9 @@ export interface Todoist {
   ): Promise<RemoteMeal>;
   delete(taskId: string, projectId: string, requestId: string): Promise<void>;
   complete(taskId: string, projectId: string, requestId: string): Promise<void>;
+  // Marks a completed task active again so it can be moved or deleted.
+  // Idempotent: an already active task is left unchanged.
+  reopen(taskId: string, projectId: string, requestId: string): Promise<void>;
   create(input: Placement, requestId: string): Promise<RemoteMeal>;
 }
 // Offline provider models remote authority in a separate file, never planner tables.
@@ -51,6 +60,7 @@ export class FakeTodoist implements Todoist {
   deleteFailBefore = 0;
   deleteCalls = 0;
   completeCalls = 0;
+  reopenCalls = 0;
   completeFailBefore = 0;
   completeLoseResponse = 0;
   failBefore = 0;
@@ -216,6 +226,29 @@ export class FakeTodoist implements Todoist {
     if (this.completeLoseResponse > 0) {
       this.completeLoseResponse--;
       throw new Error("Fake Todoist completion response lost after write");
+    }
+  }
+  async get(taskId: string, projectId: string) {
+    const task = (await this.list(projectId)).find((task) => task.id === taskId);
+    return task ?? null;
+  }
+  async reopen(taskId: string, projectId: string, _requestId: string) {
+    this.reopenCalls++;
+    await new Promise((resolve) => setTimeout(resolve, this.delayMs));
+    const rows = this.db
+      .prepare("SELECT request_id, body FROM tasks")
+      .all() as { request_id: string; body: string }[];
+    const row = rows.find(
+      (row) => (JSON.parse(row.body) as RemoteMeal).id === taskId,
+    );
+    if (!row) throw new Error("Task no longer exists");
+    const task = JSON.parse(row.body) as RemoteMeal;
+    if (task.projectId !== projectId) throw new Error("Task ownership changed");
+    if (task.completed) {
+      delete task.completed;
+      this.db
+        .prepare("UPDATE tasks SET body = ? WHERE request_id = ?")
+        .run(JSON.stringify(task), row.request_id);
     }
   }
   close() {

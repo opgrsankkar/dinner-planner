@@ -260,11 +260,11 @@ export function Planner() {
       const card = item.card;
       dragFinishedAt.current = Date.now();
       dragFinishedCardId.current = card.id;
-      if (overTrash && card.state === "saved" && !card.completed) {
+      if (overTrash && card.state === "saved") {
         dialogTrigger.current = source;
         setDeleteTarget(card);
         deleteDialog.current?.showModal();
-      } else if (cell && slot && card.state === "saved" && !card.completed) {
+      } else if (cell && slot && card.state === "saved") {
         if (cell.dataset.date !== card.date || slot.id !== card.slotId)
           void changeRef.current(card, "move", cell.dataset.date, slot);
       }
@@ -564,7 +564,6 @@ export function Planner() {
     date = card.date,
     slot?: Slot,
   ) {
-    if (card.completed) return;
     const requestId = newRequestId();
     const pending: Card = {
       ...card,
@@ -602,7 +601,7 @@ export function Planner() {
   function startTouchDrag(item: TouchDragItem, source: HTMLElement, event: React.TouchEvent<HTMLElement>) {
     if (touchDrag.current) clearTouchDragRef.current();
     if (event.touches.length !== 1) return;
-    if (item.kind === "planned" && (item.card.state !== "saved" || item.card.completed)) return;
+    if (item.kind === "planned" && item.card.state !== "saved") return;
     const touch = event.touches[0]!;
     const drag: TouchDrag = {
       item,
@@ -935,8 +934,7 @@ export function Planner() {
                             );
                             if (
                               card &&
-                              card.state === "saved" &&
-                              !card.completed
+                              card.state === "saved"
                             )
                               void change(card, "move", d.iso, slot);
                           }}
@@ -952,34 +950,33 @@ export function Planner() {
                               .map((card) => (
                                 <div
                                   role={
-                                    card.state === "saved" && !card.completed
+                                    card.state === "saved"
                                       ? "button"
                                       : undefined
                                   }
                                   tabIndex={
-                                    card.state === "saved" && !card.completed
+                                    card.state === "saved"
                                       ? 0
                                       : undefined
                                   }
                                   aria-label={
-                                    card.state === "saved" && !card.completed
+                                    card.state === "saved"
                                       ? `Move or delete ${card.name}`
                                       : undefined
                                   }
                                   aria-description={
-                                    card.state === "saved" && !card.completed
+                                    card.state === "saved"
                                       ? "Tap to choose an action, or hold for a moment and drag to move or delete."
                                       : undefined
                                   }
                                   aria-haspopup={
-                                    card.state === "saved" && !card.completed
+                                    card.state === "saved"
                                       ? "dialog"
                                       : undefined
                                   }
                                   data-card-id={card.id}
                                   draggable={
                                     card.state === "saved" &&
-                                    !card.completed &&
                                     !coarsePointer
                                   }
                                   // A drag's leftover click has no new press; a deliberate tap does.
@@ -993,14 +990,13 @@ export function Planner() {
                                       dragFinishedCardId.current = null;
                                       return;
                                     }
-                                    if (card.state === "saved" && !card.completed)
+                                    if (card.state === "saved")
                                       openCardActions(card, e.currentTarget);
                                   }}
                                   onKeyDown={(e) => {
                                     if (
                                       (e.key === "Enter" || e.key === " ") &&
-                                      card.state === "saved" &&
-                                      !card.completed
+                                      card.state === "saved"
                                     ) {
                                       e.preventDefault();
                                       openCardActions(card, e.currentTarget);
@@ -1177,7 +1173,7 @@ export function Planner() {
                     card.id ===
                     e.dataTransfer.getData("application/x-planned-meal"),
                 );
-                if (card && !card.completed && card.state === "saved") {
+                if (card && card.state === "saved") {
                   setDeleteTarget(card);
                   deleteDialog.current?.showModal();
                 }

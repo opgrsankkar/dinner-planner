@@ -227,15 +227,26 @@ test("DELETE success and 404 acknowledge without an immediate GET", async () => 
   await gone.api.delete("gone", project, requestId);
   assert.equal(gone.calls.length, 1);
 });
-test("completed tasks cannot be moved or deleted; foreign task cannot be deleted", async () => {
-  for (const payload of [
-    task({ checked: true }),
-    task({ project_id: "elsewhere" }),
-  ]) {
-    const f = fixture(() => json(payload));
-    await assert.rejects(f.api.delete(task().id, project, requestId));
-    assert.equal(f.calls.length, 1);
-  }
+test("foreign task cannot be deleted", async () => {
+  const f = fixture(() => json(task({ project_id: "elsewhere" })));
+  await assert.rejects(f.api.delete(task().id, project, requestId));
+  assert.equal(f.calls.length, 1);
+});
+
+test("a completed task is reopened with its own request ID, then deleted", async () => {
+  let checked = true;
+  const f = fixture((call) => {
+    if (call.url.pathname.endsWith("/reopen")) checked = false;
+    return call.method === "DELETE" ? new Response(null, { status: 204 }) : json(task({ checked }));
+  });
+  await f.api.delete(task().id, project, requestId);
+  const writes = f.calls.filter((call) => call.method !== "GET");
+  assert.deepEqual(writes.map((call) => `${call.method} ${call.url.pathname.split("/").at(-1)}`), [
+    "POST reopen",
+    `DELETE ${task().id}`,
+  ]);
+  assert.notEqual(writes[0].headers.get("X-Request-Id"), requestId, "reopen uses a derived request ID");
+  assert.equal(writes[1].headers.get("X-Request-Id"), requestId);
 });
 test("rate limits honor Retry-After, do not hammer, and never leak error bodies", async () => {
   const f = fixture(

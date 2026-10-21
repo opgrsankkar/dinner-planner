@@ -153,7 +153,7 @@ try {
   const completed = page
     .locator(".meal-chip")
     .filter({ hasText: "History meal" });
-  assert.equal(await completed.getAttribute("draggable"), "false");
+  assert.equal(await completed.getAttribute("draggable"), "true", "completed meals can still be moved");
   assert.equal(await completed.locator("button").count(), 0);
   await page
     .getByText("Synthetic Todoist unavailable", { exact: false })

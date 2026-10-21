@@ -125,3 +125,26 @@ test("existing Todoist databases remain usable without the new local tables", as
     assert.equal((await store.board(provider)).cards[0].state, "saved");
   } finally { await store.close(); provider.close(); }
 });
+
+test("local completed meals can be moved (staying completed) and deleted", async () => {
+  const f = await fixture();
+  try {
+    // 2020 is in the past, so the placement is created completed.
+    await f.store.place({ ...f.input, date: "2020-10-12" }, f.board.projectId);
+    await f.worker.tick();
+    const [done] = await f.provider.list(f.board.projectId);
+    assert.equal(done.completed, true);
+    const move = { requestId: randomUUID(), taskId: done.id, kind: "move" as const, slotId: f.board.slots[1].id, date: "2020-10-13" };
+    await f.store.change(move, f.provider);
+    await f.worker.tick();
+    const [moved] = await f.provider.list(f.board.projectId);
+    assert.equal(moved.date, move.date);
+    assert.equal(moved.time, f.board.slots[1].time);
+    assert.equal(moved.completed, true, "moved meal is completed again");
+    await f.store.change({ requestId: randomUUID(), taskId: done.id, kind: "delete" }, f.provider);
+    await f.worker.tick();
+    assert.equal((await f.provider.list(f.board.projectId)).length, 0);
+  } finally {
+    await f.store.close();
+  }
+});

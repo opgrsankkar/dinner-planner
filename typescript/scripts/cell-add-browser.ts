@@ -125,6 +125,25 @@ try {
   await dialog.locator(".add-meal-options button").first().click();
   await past.locator(".meal-chip.is-complete").waitFor();
 
+  // Completed meals can still be fixed: move one (it stays completed), then delete it.
+  const doneCard = past.locator(".meal-chip.is-complete[role=button]");
+  await doneCard.waitFor();
+  await doneCard.click();
+  await desktop.getByRole("dialog", { name: /^Move / }).waitFor();
+  await desktop.getByLabel("Meal slot", { exact: true }).selectOption({ label: "Dinner" });
+  await desktop.getByRole("button", { name: "Move meal", exact: true }).click();
+  const dinner = cell(desktop, 3, 2);
+  const moved = dinner.locator(".meal-chip.is-complete[role=button]");
+  await moved.waitFor();
+  assert.equal(await past.locator(".meal-chip[data-card-id]").count(), 0, "the completed meal left its old slot");
+  await desktop.getByRole("status", { name: "Meal saved", exact: true }).waitFor();
+  await desktop.waitForTimeout(2500); // let any stale listing settle
+  assert.equal(await moved.count(), 1, "the moved meal stays completed in its new slot");
+  await moved.click();
+  await desktop.getByRole("dialog", { name: /^Move / }).getByRole("button", { name: "Delete meal", exact: true }).click();
+  await desktop.getByRole("dialog", { name: "Confirm meal deletion" }).getByRole("button", { name: "Delete meal", exact: true }).click();
+  await dinner.locator(".meal-chip[data-card-id]").waitFor({ state: "detached" });
+
   // Phone: + is faintly visible without hover; the dialog does not pop the keyboard.
   const context = await browser.newContext({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
   const phone = await context.newPage();
