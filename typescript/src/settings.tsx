@@ -8,7 +8,7 @@ const sections = [
   { id: "appearance", label: "Appearance" },
   { id: "library", label: "Meal library" },
   { id: "slots", label: "Meal slots" },
-  { id: "account", label: "Account" },
+  { id: "calendar", label: "Calendar" },
 ] as const;
 type Section = (typeof sections)[number]["id"];
 
@@ -18,12 +18,10 @@ export function SettingsPage({
   board,
   post,
   refresh,
-  onLogout,
 }: {
   board: Board;
   post: (path: string, body: unknown) => Promise<unknown>;
   refresh: () => Promise<void>;
-  onLogout: () => Promise<void>;
 }) {
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
@@ -61,7 +59,7 @@ export function SettingsPage({
     requestAnimationFrame(() => navigation.current
       ?.querySelector<HTMLButtonElement>(`[data-section="${previous}"]`)?.focus());
   }
-  const [loggingOut, setLoggingOut] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState("");
   async function action(path: string, body: unknown): Promise<boolean> {
     try {
@@ -126,17 +124,31 @@ export function SettingsPage({
               setFeedback={setFeedback}
             />
           </div>
-          <div id="settings-panel-account" className="folio-account" hidden={active !== "account"}>
-            <div className="folio-section-heading"><h2>Account</h2></div>
-            <button className="secondary-button folio-logout-button" type="button" disabled={loggingOut}
-              onClick={async () => {
-                setLoggingOut(true);
-                try { await onLogout(); }
-                catch (error) { setFeedback((error as Error).message); }
-                finally { setLoggingOut(false); }
-              }}>
-              {loggingOut ? "Logging out…" : "Log out"}
-            </button>
+          <div id="settings-panel-calendar" className="folio-calendar" hidden={active !== "calendar"}>
+            <div className="folio-section-heading"><h2>Calendar</h2></div>
+            {board.calendarUrl ? (
+              <>
+                <p>Subscribe to your meal plan in Google Calendar (Other calendars → From URL) or on iPhone (Settings → Calendar → Accounts → Add Subscribed Calendar). It refreshes about hourly.</p>
+                <div className="folio-calendar-link">
+                  <input readOnly aria-label="Calendar subscription link" value={board.calendarUrl} onFocus={(event) => event.currentTarget.select()} />
+                  <button className="secondary-button folio-copy-button" type="button"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(board.calendarUrl!);
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 2000);
+                      } catch {
+                        setFeedback("Copy failed. Select the link and copy it manually.");
+                      }
+                    }}>
+                    {copied ? "Copied" : "Copy"}
+                  </button>
+                </div>
+                <p className="folio-calendar-note">Anyone with this link can see your meals, so keep it to yourself.</p>
+              </>
+            ) : (
+              <p>The calendar feed is off.</p>
+            )}
           </div>
         </div>
       </div>

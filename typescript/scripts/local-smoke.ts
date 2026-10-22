@@ -9,16 +9,14 @@ import type { Board } from "../src/types";
 const directory = await mkdtemp(join(tmpdir(), "planner-local-runtime-"));
 const origin = "http://127.0.0.1:3197";
 const env = {
-  ...process.env, TODOIST_MODE: "local", APP_PASSWORD: randomUUID(),
+  ...process.env, TODOIST_MODE: "local",
   DATABASE_PATH: join(directory, "planner.sqlite"), PLANNER_ORIGIN: origin,
-  HOST: "127.0.0.1", PORT: "3197", COOKIE_SECURE: "false",
-  ALLOWED_HOSTS: "127.0.0.1", TODOIST_TOKEN: "",
+  HOST: "127.0.0.1", PORT: "3197",   ALLOWED_HOSTS: "127.0.0.1", TODOIST_TOKEN: "",
   // Proves local mode does not read a token even when a file is configured.
   TODOIST_TOKEN_FILE: join(directory, "nonexistent-token"),
 };
 let server: ReturnType<typeof spawn> | undefined;
 let output = "";
-let cookie = "", csrf = "";
 async function start() {
   output = "";
   server = spawn(process.execPath, ["scripts/serve.mjs"], { env, stdio: ["ignore", "pipe", "pipe"] });
@@ -42,7 +40,7 @@ async function stop() {
 async function request(path: string, body?: unknown) {
   const response = await fetch(origin + path, {
     method: body === undefined ? "GET" : "POST",
-    headers: { cookie, "x-csrf-token": csrf, origin, "content-type": "application/json" },
+    headers: { origin, "content-type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   assert.ok(response.ok, `${path}: ${response.status} ${await response.clone().text()}`);
@@ -68,11 +66,7 @@ async function saved(requestId: string) {
 }
 try {
   await start();
-  assert.equal((await fetch(origin + "/api/board")).status, 401);
-  const login = await request("/api/login", { password: env.APP_PASSWORD });
-  cookie = login.headers.get("set-cookie")!;
   const initial = await board();
-  csrf = initial.csrf;
   assert.equal(initial.integrationError, "");
   assert.equal(initial.library.length, 0);
   const meal = await (await request("/api/library", { name: "Standalone dinner" })).json();
@@ -100,7 +94,7 @@ try {
   await stop();
   await start();
   assert.equal((await board()).cards.length, 0);
-  console.log("Local production smoke passed: token-free startup, authenticated create/move/delete, replay and restart persistence.");
+  console.log("Local production smoke passed: token-free startup, create/move/delete, replay and restart persistence.");
 } finally {
   await stop();
   await rm(directory, { recursive: true, force: true });

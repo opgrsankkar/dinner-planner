@@ -132,18 +132,63 @@ test("local completed meals can be moved (staying completed) and deleted", async
     // 2020 is in the past, so the placement is created completed.
     await f.store.place({ ...f.input, date: "2020-10-12" }, f.board.projectId);
     await f.worker.tick();
-    const [done] = await f.provider.list(f.board.projectId);
+    const week = { week: "2020-10-12" };
+    const [done] = await f.provider.list(f.board.projectId, week);
     assert.equal(done.completed, true);
     const move = { requestId: randomUUID(), taskId: done.id, kind: "move" as const, slotId: f.board.slots[1].id, date: "2020-10-13" };
     await f.store.change(move, f.provider);
     await f.worker.tick();
-    const [moved] = await f.provider.list(f.board.projectId);
+    const [moved] = await f.provider.list(f.board.projectId, week);
     assert.equal(moved.date, move.date);
     assert.equal(moved.time, f.board.slots[1].time);
     assert.equal(moved.completed, true, "moved meal is completed again");
     await f.store.change({ requestId: randomUUID(), taskId: done.id, kind: "delete" }, f.provider);
     await f.worker.tick();
-    assert.equal((await f.provider.list(f.board.projectId)).length, 0);
+    assert.equal((await f.provider.list(f.board.projectId, week)).length, 0);
+  } finally {
+    await f.store.close();
+  }
+});
+
+test("local completion follows the clock and listings are limited to the requested week", async () => {
+  const f = await fixture();
+  try {
+    await f.store.place(f.input, f.board.projectId);
+    await f.worker.tick();
+    const [future] = await f.provider.list(f.board.projectId);
+    assert.equal(future.completed, undefined);
+    // Moving a planned meal into the past marks it eaten; moving it back reopens it.
+    const past = { requestId: randomUUID(), taskId: future.id, kind: "move" as const, slotId: f.board.slots[0].id, date: "2020-10-14" };
+    await f.store.change(past, f.provider);
+    await f.worker.tick();
+    assert.equal((await f.provider.list(f.board.projectId)).length, 0, "old meals are outside the default window");
+    const [eaten] = await f.provider.list(f.board.projectId, { week: "2020-10-12" });
+    assert.equal(eaten.completed, true);
+    const back = { requestId: randomUUID(), taskId: future.id, kind: "move" as const, slotId: f.board.slots[0].id, date: "2030-10-15" };
+    await f.store.change(back, f.provider);
+    await f.worker.tick();
+    const [reopened] = await f.provider.list(f.board.projectId, { week: "2030-10-14" });
+    assert.equal(reopened.date, "2030-10-15");
+    assert.equal(reopened.completed, undefined);
+    assert.equal((await f.provider.list(f.board.projectId, { week: "2030-10-07" })).length, 0);
+  } finally {
+    await f.store.close();
+  }
+});
+
+test("prune drops week-old acknowledgements and orphaned receipts but keeps pending work", async () => {
+  const f = await fixture();
+  try {
+    await f.store.place(f.input, f.board.projectId);
+    await f.worker.tick();
+    const pending = { ...f.input, requestId: randomUUID(), date: "2030-10-13" };
+    await f.store.place(pending, f.board.projectId);
+    await f.store.db.outboxUpdate(f.input.requestId, { confirmedAt: String(Date.now() - 8 * 86400000) });
+    await f.store.prune();
+    assert.equal(f.store.db.outboxGet(f.input.requestId), undefined);
+    assert.equal(f.store.db.localReceiptGet(f.input.requestId), undefined);
+    assert.equal(f.store.db.outboxGet(pending.requestId)?.state, "pending");
+    assert.equal((await f.provider.list(f.board.projectId)).length, 1, "the meal itself stays");
   } finally {
     await f.store.close();
   }

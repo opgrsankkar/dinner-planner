@@ -1,83 +1,58 @@
 # Meal Planner
 
-A single-user, Docker Compose meal planner backed by the Todoist project named exactly `Meals`. Todoist remains authoritative for planned meals; a durable SQLite outbox applies planner changes to Todoist in the background so drag/drop does not wait on its API.
-
-## Standalone Docker deployment (without Todoist)
-
-Use the standalone Compose file to store planned meals, library and settings in a
-persistent SQLite volume. No Todoist account, token file or `.env` file is needed.
-
-```sh
-export APP_PASSWORD='choose-a-private-password'
-docker compose -f compose.local.yaml up -d --build
-```
-
-Open `http://localhost:8789`. The container uses `TODOIST_MODE=local` and starts with
-an empty library and the default meal slots. Add meals and plan them using the same
-board, drag/drop, move/delete buttons and Settings. Plans survive container restarts
-and rebuilds; `docker compose down -v` deletes the named data volume.
-
-The port binds to loopback. To serve through an HTTPS reverse proxy, set
-`PLANNER_ORIGIN=https://your-hostname` and `COOKIE_SECURE=true`. For a different
-local port, set both `PLANNER_PORT` and `PLANNER_ORIGIN` (for example `8790` and
-`http://localhost:8790`). Use a separate database/volume from a Todoist deployment;
-switching modes does not import or synchronize existing plans. Local mode has no
-Todoist completed-task history.
-
-To run the image directly, mount a writable volume at `/data` and set
-`TODOIST_MODE=local`, `DATABASE_PATH=/data/planner.sqlite`, `APP_PASSWORD`, and
-`PLANNER_ORIGIN` to the URL you will open.
+A single-user, Docker Compose meal planner. SQLite on the host is the source of truth for the meal library, slots, settings and planned meals. A read-only calendar feed puts the plan on your phone.
 
 ## Run
 
-The x1c deployment uses `compose.yaml` and Caddy. Requirements:
-
-- A Todoist API token, either `TODOIST_TOKEN` directly in `.env` or a host path in `TODOIST_TOKEN_FILE` containing only the token.
-- `APP_PASSWORD` and a random `SESSION_SECRET` (the initial host setup generates these privately).
+The x1c deployment uses `compose.yaml` behind Caddy at `https://meals.happydaysblr.ddns.net`, which only admits the home network and the tailnet; the app itself has no login.
 
 ```bash
+./setup.sh                      # private .env with host UID/GID and a calendar token
 sudo systemctl enable --now homelab-dinner-planner.service
 ```
 
-Open `https://meals.happydaysblr.ddns.net`. To retrieve the generated sign-in password locally on the host, run:
+Caddy must keep the LAN/Tailscale gate on everything except the calendar feed:
 
-```bash
-cd /srv/homelab/compose/dinner-planner && grep '^APP_PASSWORD=' .env
 ```
-
-To use a direct token, set `TODOIST_TOKEN=...` in `.env`; it takes precedence over the token file. To use a file, leave it blank and set `TODOIST_TOKEN_FILE` to a host path containing only the API token. The file is mounted read-only and must not be committed.
+meals.happydaysblr.ddns.net {
+	@calendar path_regexp ^/api/calendar/[A-Za-z0-9_-]{20,}\.ics$
+	handle @calendar {
+		reverse_proxy 172.17.0.1:8789
+	}
+	@trusted remote_ip 192.168.0.0/24 100.64.0.0/10 fd7a:115c:a1e0::/48 127.0.0.1 ::1
+	handle @trusted {
+		reverse_proxy 172.17.0.1:8789
+	}
+	handle {
+		respond "Meals is available only on the home network or Tailscale." 403
+	}
+}
+```
 
 ## Data and behavior
 
-- Monday–Sunday board; meal-slot rows share one global configurable list and each slot has a unique preset time.
-- Initial time presets: Breakfast 08:00, Lunch 13:00, Dinner 19:00, School snack 16:00 (Asia/Kolkata). Change these in Settings.
-- On phones and other screens 900px wide or narrower, the week fills the screen without vertical scrolling (slot labels stay frozen while the days scroll sideways) and the library panel is hidden: plan with the + in each cell (its dialog also has Shuffle), and manage the library in Settings → Meal library.
-- Tap or click the faint + in any calendar cell (also shown in cells that already have meals) to add a meal to that day and slot: pick a library meal, or type a new name to add it to the library and plan it. Past slots are planned as already done. Drag a library meal into a dated slot to create a distinct Todoist task. Drag a planned item to another cell to update its due date/time. Completed meals (✓) can also be moved or deleted: the planner reopens the Todoist task, makes the change, and completes a moved meal again. On touch screens, tap a planned item to open its move/delete actions, or tap a library meal to plan it. Alternatively hold either for about half a second and drag: a copy follows above your finger, holding near a screen edge scrolls the board or page, and planned items can be dropped on the trash pinned to the bottom of the screen. Moving before the hold completes scrolls normally. Trash deletion still requires confirmation. Plan edits are recorded transactionally in SQLite and pushed one-way by a background worker; tiny per-meal spinner/check indicators show progress, without a page reload or global syncing banner.
-- Add library names via the library search field and Add meal; Shuffle randomizes the persistent library order. Remove reusable entries from Settings → Manage meal library; this does not delete existing Todoist placements.
-- Appearance starts in `system` mode. The plan-page toggle switches to the opposite of the current effective system/light/dark theme; Settings offers System, Light, and Dark so you can reset to system.
-- Completed task history is read from Todoist where available. SQLite keeps durable outbox receipts; bounded temporary snapshots and optimistic overlays are reconciled with Todoist—not a separate permanent plan history. Undated and invalid-time tasks are reported as warnings.
-- Slot-time edits migrate active Meals tasks from the old preset time to the new one. The setting remains classifiable if a Todoist write is temporarily incomplete; the error is shown and a retry can finish the migration.
-- A missing/ambiguous Meals project, API error, missing due time, or unknown preset never silently becomes a local plan. The board displays integration errors or a warning.
+- Monday–Sunday board; meal-slot rows share one global configurable list and each slot has a unique preset time (Asia/Kolkata). Change them in Settings.
+- On phones and other screens 900px wide or narrower, the week fills the screen without vertical scrolling and the library panel is hidden: plan with the + in each cell (its dialog also has Shuffle), and manage the library in Settings → Meal library.
+- Tap or click the faint + in any cell to add a meal to that day and slot, or drag a library meal into a slot. Drag a planned meal to another cell to move it, or onto the trash to delete it (with confirmation). On touch screens, tap a planned meal for move/delete actions, or hold and drag.
+- A meal counts as eaten (✓) once its date and slot time have passed; moving it changes that automatically.
+- Changes are recorded in a durable SQLite outbox and applied by a background worker, so the board stays responsive; small per-meal spinner/check indicators show progress. Acknowledged entries older than a week are pruned hourly.
+- Settings → Calendar shows the private subscription link (`/api/calendar/<ICS_TOKEN>.ics`) for Google Calendar or iPhone. It covers two weeks back and three months ahead and refreshes about hourly. Rotate `ICS_TOKEN` in `.env` to revoke the old link.
+- Appearance follows the system by default; Settings offers System, Light and Dark.
 
 ## Security and storage
 
-- Single shared password, server-side opaque HttpOnly/Secure/SameSite session, throttled login, CSRF checks, trusted-host validation, security headers, and server-only Todoist token.
-- The web process runs non-root using the host UID/GID from `.env` so it can read a mode-0600 token file and write private bind-mounted data. It drops Linux capabilities and binds only to `172.17.0.1:8789` for Caddy.
-- SQLite lives at `DATABASE_PATH` (default `/data/meals.sqlite3`); `/data` is the persistent host bind mount. Unsent actions survive app/container restarts, retry with backoff, and expose a small per-meal retry control after repeated failure. A successful Todoist DELETE response is treated as the acknowledgement; the app does not immediately GET the deleted task, avoiding false “still exists” errors from stale reads.
-- Local Lucide SVG icons are served from the app itself; no third-party icon CDN or runtime font dependency is needed.
-- Copy `.env.example` to `.env` only for a fresh manual deployment. Never commit `.env`, `secrets/`, or `data/`.
+- No login: Caddy's network gate decides who can reach the app. The server still checks the Host header and rejects any write whose Origin is not the planner itself, so other websites cannot post to it from your browser.
+- The process runs as the host UID/GID from `.env`, read-only root filesystem, no Linux capabilities, bound only to `172.17.0.1:8789` for Caddy.
+- SQLite lives at `DATABASE_PATH` (default `/data/meals.sqlite3`) on the `./data` bind mount and is snapshotted nightly by the homelab backup.
+- Never commit `.env` or `data/`.
 
-## TypeScript application
+## Todoist
 
-The root container now builds and hosts TanStack Start/React with Node 26 and direct SQLite via `node:sqlite`. See [implementation, verification and cutover instructions](typescript/README.md). The Python source remains only as a behavior/data reference and rollback artifact; never point the new runtime at the old Python database. Import an explicit backup into a distinct target and set `DATABASE_PATH` to it.
+The planner used to keep planned meals in a Todoist project named `Meals`. That provider (`TODOIST_MODE=live`) and a fake for tests are still in the code. `npm run import:todoist -- --from YYYY-MM-DD` copies a Meals project into the local tables (re-runnable; keyed by Todoist task ID). See [typescript/README.md](typescript/README.md).
 
-## Local checks
+## Checks
 
 ```bash
-cd app/frontend && npm ci && npm run build
-cd ../..
-python -m pytest app/tests -q
-sudo docker compose -f compose.yaml config -q
-sudo docker compose -f compose.yaml build
-sudo docker build --target test -t dinner-planner-test . # App tests in-image; host-only scheduler integration is covered by pytest above.
+sudo docker build --target build .   # typecheck, unit tests and production build
+sudo docker compose config -q
 ```

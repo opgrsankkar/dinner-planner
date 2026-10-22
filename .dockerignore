@@ -2,7 +2,6 @@
 .env
 secrets
 data
-app
 node_modules
 typescript/node_modules
 typescript/.local

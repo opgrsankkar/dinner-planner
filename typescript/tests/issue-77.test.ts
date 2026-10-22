@@ -329,11 +329,13 @@ test("standalone local mode completes past meals and leaves future meals open", 
     await f.store.place(past, f.board.projectId);
     assert.equal((await f.store.board(f.provider)).cards[0]!.completed, true);
     await f.worker.tick();
-    const saved = (await f.provider.list(f.board.projectId)).find(
+    // Local listings cover recent weeks unless a week is requested.
+    const pastWeek = { week: "2020-01-27" };
+    const saved = (await f.provider.list(f.board.projectId, pastWeek)).find(
       (item) => item.requestId === past.requestId,
     )!;
     assert.equal(saved.completed, true);
-    assert.equal((await f.store.board(f.provider)).cards[0]!.completed, true);
+    assert.equal((await f.store.board(f.provider, pastWeek.week)).cards[0]!.completed, true);
 
     const future = f.input("2999-02-01");
     await f.store.place(future, f.board.projectId);
@@ -363,7 +365,8 @@ test("local completion lost acknowledgement retries without duplicating or resur
     await f.store.place(past, f.board.projectId);
     await f.worker.tick();
     assert.equal((await f.store.db.outboxAll())[0]!.state, "pending");
-    const afterFirst = (await f.provider.list(f.board.projectId)).filter(
+    const pastWeek = { week: "2020-01-27" };
+    const afterFirst = (await f.provider.list(f.board.projectId, pastWeek)).filter(
       (item) => item.requestId === past.requestId,
     );
     assert.equal(afterFirst.length, 1);
@@ -371,13 +374,13 @@ test("local completion lost acknowledgement retries without duplicating or resur
 
     await f.store.retry(past.requestId, f.provider);
     await f.worker.tick();
-    const afterRetry = (await f.provider.list(f.board.projectId)).filter(
+    const afterRetry = (await f.provider.list(f.board.projectId, pastWeek)).filter(
       (item) => item.requestId === past.requestId,
     );
     assert.equal(afterRetry.length, 1);
     assert.equal(afterRetry[0]!.completed, true);
     assert.equal((await f.store.db.outboxAll())[0]!.state, "saved");
-    assert.equal((await f.store.board(f.provider)).cards[0]!.state, "saved");
+    assert.equal((await f.store.board(f.provider, pastWeek.week)).cards[0]!.state, "saved");
   } finally {
     await f.store.close();
   }

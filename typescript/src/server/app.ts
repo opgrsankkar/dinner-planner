@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { mealsCalendar } from "./calendar";
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { Slot } from "../types";
@@ -11,17 +12,15 @@ export type App = {
   store: Store;
   todoist: Todoist;
   worker: Worker;
-  password: string;
   origin: string;
-  loginFailures: { count: number; resetAt: number };
+  // Secret path segment for the read-only calendar feed; empty disables it.
+  calendarToken: string;
 };
 const globalApp = globalThis as typeof globalThis & {
   plannerApp?: Promise<App>;
 };
 export function app(): Promise<App> {
   return (globalApp.plannerApp ??= (async () => {
-    const password = process.env.APP_PASSWORD ?? process.env.PLANNER_PASSWORD;
-    if (!password) throw new Error("Set APP_PASSWORD before starting");
     const path = resolve(
       process.env.DATABASE_PATH ??
         process.env.PLANNER_DB ??
@@ -67,9 +66,8 @@ export function app(): Promise<App> {
       store,
       todoist,
       worker,
-      password,
       origin: process.env.PLANNER_ORIGIN ?? "http://localhost:8789",
-      loginFailures: { count: 0, resetAt: 0 },
+      calendarToken: process.env.ICS_TOKEN?.trim() ?? "",
     };
   })());
 }
@@ -87,8 +85,9 @@ function json(
     },
   });
 }
-function cookie(token: string, origin: string, logout = false) {
-  return `planner_session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${logout ? 0 : 604800}${process.env.COOKIE_SECURE === "true" || origin.startsWith("https:") ? "; Secure" : ""}`;
+function sameSecret(a: string, b: string) {
+  const hash = (value: string) => createHash("sha256").update(value).digest();
+  return timingSafeEqual(hash(a), hash(b));
 }
 export async function handle(
   request: Request,
@@ -114,49 +113,22 @@ export async function handle(
     return json({ error: "Invalid request origin" }, 403);
   if (request.method === "GET" && url.pathname === "/api/health")
     return json({ ok: true });
+  // The planner has no login: Caddy admits only the home network and tailnet.
+  // The Origin check above blocks cross-site writes from other pages.
+  const feed = url.pathname.match(/^\/api\/calendar\/([A-Za-z0-9_-]{20,})\.ics$/);
+  if (request.method === "GET" && feed) {
+    if (!current.calendarToken || !sameSecret(feed[1], current.calendarToken))
+      return json({ error: "Unknown endpoint" }, 404);
+    const board = await store.board(todoist);
+    return new Response(mealsCalendar(board.cards, board.slots, new Date()), {
+      headers: {
+        "Content-Type": "text/calendar; charset=utf-8",
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  }
   try {
-    if (url.pathname === "/api/login" && request.method === "POST") {
-      if (Date.now() > current.loginFailures.resetAt)
-        current.loginFailures = { count: 0, resetAt: Date.now() + 60000 };
-      if (current.loginFailures.count >= 10)
-        return json({ error: "Try again in a minute" }, 429);
-      const body: unknown = await request.json();
-      const password =
-        typeof body === "object" &&
-        body !== null &&
-        "password" in body &&
-        typeof body.password === "string"
-          ? body.password
-          : "";
-      const hash = (value: string) =>
-        createHash("sha256").update(value).digest();
-      if (!timingSafeEqual(hash(password), hash(current.password))) {
-        current.loginFailures.count++;
-        return json({ error: "Incorrect password" }, 401);
-      }
-      const session = await store.login();
-      current.loginFailures.count = 0;
-      return json({ ok: true }, 200, {
-        "Set-Cookie": cookie(session.id, origin),
-      });
-    }
-    const token =
-      request.headers
-        .get("cookie")
-        ?.match(/(?:^|;\s*)planner_session=([^;]*)/)?.[1] ?? "";
-    const session = await store.session(token);
-    if (!session) return json({ error: "Sign in required" }, 401);
-    if (
-      request.method !== "GET" &&
-      request.headers.get("x-csrf-token") !== session.csrf
-    )
-      return json({ error: "Invalid CSRF token" }, 403);
-    if (url.pathname === "/api/logout" && request.method === "POST") {
-      await store.logout(token);
-      return json({ ok: true }, 200, {
-        "Set-Cookie": cookie("", origin, true),
-      });
-    }
     if (url.pathname === "/api/board" && request.method === "GET") {
       const week = url.searchParams.get("week") ?? undefined;
       if (
@@ -167,7 +139,9 @@ export async function handle(
         throw new Error("Invalid week");
       return json({
         ...(await store.board(todoist, week)),
-        csrf: session.csrf,
+        calendarUrl: current.calendarToken
+          ? `${origin}/api/calendar/${current.calendarToken}.ics`
+          : "",
       });
     }
     if (
