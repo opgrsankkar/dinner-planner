@@ -16,11 +16,10 @@ try {
   await rm(probe, { force: true });
 }
 const directory = await mkdtemp(join(tmpdir(), "planner-runtime-"));
-const password = randomUUID();
 const env = {
   ...process.env,
   TODOIST_MODE: "fake", TODOIST_TOKEN: "", TODOIST_TOKEN_FILE: "",
-  APP_PASSWORD: password, COOKIE_SECURE: "false",
+  COOKIE_SECURE: "false",
   ALLOWED_HOSTS: "127.0.0.1", PLANNER_ORIGIN: "http://127.0.0.1:3110",
   PORT: "3110", HOST: "127.0.0.1",
   FAKE_TODOIST_DB: join(directory, "fake.sqlite"),
@@ -45,14 +44,7 @@ async function startup(db: string, expectedMeal?: string) {
       await new Promise((done) => setTimeout(done, 100));
     }
     assert.ok(ready, output);
-    const login = await fetch("http://127.0.0.1:3110/api/login", {
-      method: "POST", headers: { Origin: env.PLANNER_ORIGIN, "Content-Type": "application/json" },
-      body: JSON.stringify({ password }),
-    });
-    assert.equal(login.status, 200);
-    const response = await fetch("http://127.0.0.1:3110/api/board", {
-      headers: { Cookie: login.headers.get("set-cookie")!.split(";")[0] },
-    });
+    const response = await fetch("http://127.0.0.1:3110/api/board");
     assert.equal(response.status, 200);
     const board = await response.json();
     if (expectedMeal) assert.ok(board.library.some((meal: { name: string }) => meal.name === expectedMeal));

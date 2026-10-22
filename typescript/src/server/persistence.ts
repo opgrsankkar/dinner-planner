@@ -7,7 +7,6 @@ export type LocalMealRow = { id: string; body: string };
 export type LocalReceiptRow = { id: string; body: string };
 export type OutboxRow = { id: string; payload: string; state: string; error: string; remoteId: string; attempted: string; nextAt: string; confirmedAt: string };
 export type SettingRow = { id: string; value: string };
-export type SessionRow = { id: string; csrf: string; expiresAt: string };
 
 // SQL identifiers below are fixed application constants; values always use bindings.
 // Version 1 adopts the original text/CHARACTER tables without rewriting their rows.
@@ -113,17 +112,11 @@ export class Persistence {
     this.prepare('UPDATE "setting" SET ' + columns.map(column => '"' + column + '" = ?').join(', ') + ' WHERE id = ?')
       .run(...columns.map(column => patch[column as keyof typeof patch]!), id);
   }
-  sessionGet(id: string): SessionRow | undefined { const row = this.prepare('SELECT "id", "csrf", "expiresAt" FROM "session" WHERE id = ?').get(id); return row ? { ...row } as SessionRow : undefined; }
-  sessionInsert(input: Omit<SessionRow, "id"> & { id?: string }): SessionRow {
-    const row = { ...input, id: input.id ?? randomUUID() };
-    this.prepare('INSERT INTO "session" ("id", "csrf", "expiresAt") VALUES (?, ?, ?)').run(row.id, row.csrf, row.expiresAt);
-    return row;
-  }
-  sessionDelete(id: string) { this.prepare('DELETE FROM "session" WHERE id = ?').run(id); }
-  sessionUpdate(id: string, patch: Partial<Omit<SessionRow, "id">>) {
-    const columns = ["csrf", "expiresAt"].filter(column => patch[column as keyof typeof patch] !== undefined);
-    if (!columns.length) return;
-    this.prepare('UPDATE "session" SET ' + columns.map(column => '"' + column + '" = ?').join(', ') + ' WHERE id = ?')
-      .run(...columns.map(column => patch[column as keyof typeof patch]!), id);
+  // Drops acknowledged outbox rows older than `before` (ms), receipts that no
+  // longer belong to an outbox row, and rows left from the retired login.
+  outboxPrune(before: number) {
+    this.prepare('DELETE FROM "outbox" WHERE "state" = \'saved\' AND CAST("confirmedAt" AS INTEGER) < ?').run(before);
+    this.prepare('DELETE FROM "local_receipt" WHERE "id" NOT IN (SELECT "id" FROM "outbox")').run();
+    this.prepare('DELETE FROM "session"').run();
   }
 }

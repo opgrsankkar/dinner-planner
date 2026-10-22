@@ -141,7 +141,7 @@ export class Store {
   private lastProject = "";
   private observed = new Set<string>();
   private snapshots = new Map<string, import("../types").RemoteMeal[]>();
-  async board(todoist: Todoist, week?: string): Promise<Omit<Board, "csrf">> {
+  async board(todoist: Todoist, week?: string): Promise<Omit<Board, "calendarUrl">> {
     let project = { id: this.lastProject, name: "Meals" };
     let remote = this.snapshots.get(week ?? "active") ?? [];
     let integrationError = "";
@@ -167,8 +167,13 @@ export class Store {
     }
     return this.write(async () => {
       const settings = await this.settings();
-      const operations = (this.db.outboxAll()).filter(
-        (row) => (JSON.parse(row.payload) as Mutation).projectId === project.id,
+      // Parse each outbox payload once; board polls run every few seconds.
+      const operations = this.db
+        .outboxAll()
+        .map((row) => ({ ...row, data: JSON.parse(row.payload) as Mutation }))
+        .filter((row) => row.data.projectId === project.id);
+      const newestFirst = [...operations].sort(
+        (a, b) => Number(b.confirmedAt) - Number(a.confirmedAt),
       );
       const cards: Card[] = remote
         .filter(
@@ -177,15 +182,13 @@ export class Store {
             !operations.some(
               (row) =>
                 row.state === "saved" &&
-                (JSON.parse(row.payload) as Mutation).kind === "delete" &&
+                row.data.kind === "delete" &&
                 row.remoteId === task.id &&
                 Date.now() - Number(row.confirmedAt) < 120000,
             ),
         )
         .map((task) => {
-          const op = [...operations]
-            .sort((a, b) => Number(b.confirmedAt) - Number(a.confirmedAt))
-            .find(
+          const op = newestFirst.find(
               (row) =>
                 (row.id === task.requestId || row.remoteId === task.id) &&
                 row.state === "saved",
@@ -198,7 +201,7 @@ export class Store {
           };
         });
       for (const op of operations.filter((row) => row.state === "pending")) {
-        const payload: Mutation = JSON.parse(op.payload);
+        const payload = op.data;
         if (payload.projectId !== project.id) continue;
         // Keep spinner until worker validation, even if the provider exposes the write early.
         const remoteIndex = cards.findIndex(
@@ -224,15 +227,13 @@ export class Store {
         .sort((a, b) => Number(a.confirmedAt) - Number(b.confirmedAt)))
         latest.set(op.remoteId, op);
       for (const op of latest.values()) {
-        const payload: Mutation = JSON.parse(op.payload);
+        const payload = op.data;
         if (
           payload.kind === "delete" ||
           this.observed.has(op.id) ||
           Date.now() - Number(op.confirmedAt) >= 120000 ||
           operations.some(
-            (row) =>
-              row.state === "pending" &&
-              (JSON.parse(row.payload) as Mutation).taskId === op.remoteId,
+            (row) => row.state === "pending" && row.data.taskId === op.remoteId,
           )
         )
           continue;
@@ -276,12 +277,7 @@ export class Store {
         settings,
         integrationError,
         projectId: project.id,
-        receivedRequests: operations
-          .filter(
-            (row) =>
-              (JSON.parse(row.payload) as Mutation).projectId === project.id,
-          )
-          .map((row) => row.id),
+        receivedRequests: operations.map((row) => row.id),
         library: sort(this.db.libraryAll(), settings.libraryOrder),
         slots: sortSlotsByTime(sort(slots, settings.slotOrder)),
         cards,
@@ -556,23 +552,11 @@ export class Store {
       return this.settings();
     });
   }
-  async session(token: string) {
-    if (!uuidPattern.test(token)) return null;
-    const session = this.db.sessionGet(token);
-    return session && Number(session.expiresAt) > Date.now() ? session : null;
-  }
-  async login() {
-    return this.write(() =>
-      this.db.sessionInsert({
-        id: randomUUID(),
-        csrf: randomUUID(),
-        expiresAt: String(Date.now() + 7 * 86400000),
-      }),
-    );
-  }
-  async logout(token: string) {
+  // Saved receipts only matter while a request can still be retried; keep a
+  // week of them and drop the rest so board reads stay small.
+  async prune(now = Date.now()) {
     await this.write(() =>
-      this.db.sessionDelete(token),
+      this.db.transaction((tx) => tx.outboxPrune(now - 7 * 86400000)),
     );
   }
   async close() {
@@ -590,6 +574,7 @@ function validDate(date: string) {
 export class Worker {
   private active: Promise<void> | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
+  private pruneTimer: ReturnType<typeof setInterval> | undefined;
   constructor(
     private store: Store,
     private todoist: Todoist,
@@ -600,6 +585,10 @@ export class Worker {
         void this.tick().catch(console.error);
       }, 300);
       this.timer.unref();
+      const prune = () => void this.store.prune().catch(console.error);
+      prune();
+      this.pruneTimer = setInterval(prune, 3600000);
+      this.pruneTimer.unref();
     }
   }
   tick(): Promise<void> {
@@ -766,7 +755,9 @@ export class Worker {
   }
   async stop() {
     if (this.timer) clearInterval(this.timer);
+    if (this.pruneTimer) clearInterval(this.pruneTimer);
     this.timer = undefined;
+    this.pruneTimer = undefined;
     await this.active;
   }
 }

@@ -247,15 +247,14 @@ test("saved write overlay is bounded, then provider is authoritative", async () 
     await f.close();
   }
 });
-test("login/session/logout, hostile hosts/origins, CSRF, expiry and wrong password", async () => {
+test("no login: hostile hosts and cross-site origins are rejected, same-origin writes work", async () => {
   const f = await fixture();
   const current: App = {
     store: f.store,
     todoist: f.provider,
     worker: f.worker,
-    password: randomUUID(),
     origin: "http://localhost:3000",
-    loginFailures: { count: 0, resetAt: 0 },
+    calendarToken: "",
   };
   const request = (
     path: string,
@@ -274,7 +273,7 @@ test("login/session/logout, hostile hosts/origins, CSRF, expiry and wrong passwo
       ...(method === "GET" ? {} : { body: JSON.stringify(body) }),
     });
   try {
-    assert.equal((await handle(request("/api/board"), current)).status, 401);
+    assert.equal((await handle(request("/api/board"), current)).status, 200);
     assert.equal(
       (await handle(new Request("http://evil.test/api/health"), current))
         .status,
@@ -283,72 +282,57 @@ test("login/session/logout, hostile hosts/origins, CSRF, expiry and wrong passwo
     assert.equal(
       (
         await handle(
-          request(
-            "/api/login",
-            "POST",
-            { password: current.password },
-            { origin: "http://evil.test" },
-          ),
+          request("/api/plan", "POST", f.input, { origin: "http://evil.test" }),
           current,
         )
       ).status,
       403,
     );
+    const noOrigin = new Request(`${current.origin}/api/plan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(f.input),
+    });
+    assert.equal((await handle(noOrigin, current)).status, 403);
     assert.equal(
-      (
-        await handle(
-          request("/api/login", "POST", { password: "incorrect-test-input" }),
-          current,
-        )
-      ).status,
-      401,
-    );
-    const login = await handle(
-      request("/api/login", "POST", { password: current.password }),
-      current,
-    );
-    assert.equal(login.status, 200);
-    const cookie = login.headers.get("set-cookie")!;
-    assert.match(cookie, /HttpOnly/);
-    assert.match(cookie, /SameSite=Strict/);
-    const board = await (
-      await handle(request("/api/board", "GET", {}, { cookie }), current)
-    ).json();
-    assert.ok(board.csrf);
-    assert.equal(
-      (await handle(request("/api/plan", "POST", f.input, { cookie }), current))
-        .status,
-      403,
-    );
-    const mutationHeaders = { cookie, "x-csrf-token": board.csrf };
-    assert.equal(
-      (
-        await handle(
-          request("/api/plan", "POST", f.input, mutationHeaders),
-          current,
-        )
-      ).status,
+      (await handle(request("/api/plan", "POST", f.input), current)).status,
       202,
     );
     assert.equal(
-      (
-        await handle(
-          request("/api/logout", "POST", {}, mutationHeaders),
-          current,
-        )
-      ).status,
-      200,
-    );
-    assert.equal(
-      (await handle(request("/api/board", "GET", {}, { cookie }), current))
+      (await handle(request("/api/login", "POST", { password: "x" }), current))
         .status,
-      401,
+      404,
     );
-    const session = await f.store.login();
-    await f.store.db.sessionUpdate(session.id, {
-      expiresAt: "0",
-    });
-    assert.equal(await f.store.session(session.id), null);
+  } finally {
+    await f.close();
+  }
+});
+
+test("calendar feed needs the exact secret and lists saved meals", async () => {
+  const f = await fixture();
+  const token = "test-calendar-token-0123456789";
+  const current: App = {
+    store: f.store,
+    todoist: f.provider,
+    worker: f.worker,
+    origin: "http://localhost:3000",
+    calendarToken: token,
+  };
+  try {
+    const off = { ...current, calendarToken: "" };
+    assert.equal((await handle(new Request(`${current.origin}/api/calendar/${token}.ics`), off)).status, 404);
+    assert.equal((await handle(new Request(`${current.origin}/api/calendar/wrong-token-0123456789abc.ics`), current)).status, 404);
+    await f.store.place(f.input, f.project.id);
+    await f.worker.tick();
+    const board = await (await handle(new Request(`${current.origin}/api/board`), current)).json();
+    assert.equal(board.calendarUrl, `${current.origin}/api/calendar/${token}.ics`);
+    const feed = await handle(new Request(board.calendarUrl), current);
+    assert.equal(feed.status, 200);
+    assert.match(feed.headers.get("content-type")!, /text\/calendar/);
+    const text = await feed.text();
+    assert.match(text, /^BEGIN:VCALENDAR\r\n/);
+    // 2030-10-01 is beyond the 90-day window, so the feed holds no events yet.
+    assert.doesNotMatch(text, /BEGIN:VEVENT/);
   } finally {
     await f.close();
   }
@@ -793,23 +777,17 @@ test("library rename persists identity/order and leaves planned provider meals u
   } finally { await f.close(); }
 });
 
-test("rename API requires authentication, same origin and CSRF and validates fields", async () => {
+test("rename API requires same origin and validates fields", async () => {
   const f = await fixture();
-  const app: App = { store: f.store, todoist: f.provider, worker: f.worker, password: randomUUID(), origin: "http://localhost:3000", loginFailures: { count: 0, resetAt: 0 } };
+  const app: App = { store: f.store, todoist: f.provider, worker: f.worker, origin: "http://localhost:3000", calendarToken: "" };
   const request = (path: string, body: unknown, headers: Record<string, string> = {}) => new Request(app.origin + path, {
     method: "POST", headers: { origin: app.origin, "content-type": "application/json", ...headers }, body: JSON.stringify(body),
   });
   const body = { mealId: f.input.mealId, name: "API renamed meal" };
   try {
-    assert.equal((await handle(request("/api/library/rename", body), app)).status, 401);
-    const login = await handle(request("/api/login", { password: app.password }), app);
-    const cookie = login.headers.get("set-cookie")!;
-    const board = await (await handle(new Request(app.origin + "/api/board", { headers: { cookie } }), app)).json();
-    assert.equal((await handle(request("/api/library/rename", body, { cookie }), app)).status, 403);
-    const headers = { cookie, "x-csrf-token": board.csrf };
-    assert.equal((await handle(request("/api/library/rename", body, { ...headers, origin: "http://evil.test" }), app)).status, 403);
-    assert.equal((await handle(request("/api/library/rename", { ...body, name: 3 }, headers), app)).status, 400);
-    assert.equal((await handle(request("/api/library/rename", body, headers), app)).status, 202);
+    assert.equal((await handle(request("/api/library/rename", body, { origin: "http://evil.test" }), app)).status, 403);
+    assert.equal((await handle(request("/api/library/rename", { ...body, name: 3 }), app)).status, 400);
+    assert.equal((await handle(request("/api/library/rename", body), app)).status, 202);
     assert.equal((await f.store.board(f.provider)).library.find(meal => meal.id === body.mealId)?.name, body.name);
   } finally { await f.close(); }
 });

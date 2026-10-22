@@ -136,9 +136,7 @@ export function Planner() {
   const placeRef = useRef<(meal: Meal, date: string, slot: Slot) => Promise<void>>(async () => {});
   const clearTouchDragRef = useRef<() => void>(() => {});
   const activateTouchDragRef = useRef<(drag: TouchDrag) => void>(() => {});
-  const [signedOut, setSignedOut] = useState(false);
   const [error, setError] = useState("");
-  const [password, setPassword] = useState("");
   const [search, setSearch] = useState("");
   const [recentMeals, setRecentMeals] = useState<string[]>([]);
   const [libraryAdding, setLibraryAdding] = useState(false);
@@ -435,14 +433,8 @@ export function Planner() {
       ),
     );
   }
-  const csrf = board?.csrf ?? "";
   const refresh = useCallback(async () => {
     const response = await fetch(`/api/board?week=${week}`);
-    if (response.status === 401) {
-      setSignedOut(true);
-      setBoard(null);
-      return;
-    }
     const result = await response.json();
     if (!response.ok) throw new Error(result.error);
     const next = result as Board;
@@ -457,7 +449,6 @@ export function Planner() {
     );
     next.cards.push(...local.current.values());
     setBoard(next);
-    setSignedOut(false);
     setNow(Date.now());
   }, [week]);
   useEffect(() => {
@@ -538,7 +529,7 @@ export function Planner() {
   async function post(path: string, body: unknown) {
     const response = await fetch(path, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
     const result = await response.json();
@@ -734,48 +725,6 @@ export function Planner() {
     dialog.current?.close();
     deleteDialog.current?.showModal();
   }
-  if (signedOut)
-    return (
-      <main className="login-card" style={{ margin: "12vh auto" }}>
-        <div className="login-mark">✦</div>
-        <h1>Meal Planner</h1>
-        {error && (
-          <p className="error-banner" role="alert">
-            {error}
-          </p>
-        )}
-        <form
-          className="login-form"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            setBusy(true);
-            try {
-              await post("/api/login", { password });
-              setPassword("");
-              setError("");
-              await refresh();
-            } catch (e) {
-              setError((e as Error).message);
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          <label htmlFor="password">Password</label>
-          <input
-            id="password"
-            type="password"
-            autoComplete="current-password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          <button className="primary-button" disabled={busy}>
-            Sign in
-          </button>
-        </form>
-      </main>
-    );
   if (!board)
     return (
       <main
@@ -842,14 +791,7 @@ export function Planner() {
         </div>}
       </header>
       {settingsPage ? (
-        <SettingsPage board={board} post={post} refresh={refresh} onLogout={async () => {
-          await post("/api/logout", {});
-          local.current.clear();
-          intents.current.clear();
-          persistIntents();
-          setBoard(null);
-          setSignedOut(true);
-        }} />
+        <SettingsPage board={board} post={post} refresh={refresh} />
       ) : (
         <main className="app-layout">
           <section className="planner-panel" aria-label="Weekly meal planner">

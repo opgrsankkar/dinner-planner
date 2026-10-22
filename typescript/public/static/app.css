@@ -292,12 +292,15 @@ html[data-theme=dark] .library-feedback[role=alert]{color:#ff8c9c}
 .week-picker-current-star{position:absolute;top:0;bottom:0;margin-top:auto;margin-bottom:auto;height:11px;right:calc(100% - var(--week-picker-gutter) + 2px);width:12px;font-size:11px;line-height:11px;text-align:right;color:var(--ink);pointer-events:none}
 @media(max-width:560px){.week-picker{padding:12px}.week-picker-days{grid-template-columns:44px repeat(7,minmax(0,1fr))}.week-picker-row{--week-picker-gutter:41px;grid-template-columns:41px minmax(0,1fr)}}
 
-/* Account actions use the same inked, offset Folio buttons as the other settings controls. */
-.folio-account .folio-logout-button{min-height:44px;padding:10px 18px;border:1px solid var(--ink);border-radius:5px 8px 6px 7px;background:var(--pink);color:var(--ink);box-shadow:3px 3px 0 var(--ink);font-weight:700;transition:transform .12s,box-shadow .12s;}
-.folio-account .folio-logout-button:hover:not(:disabled){transform:translate(-1px,-1px);box-shadow:4px 4px 0 var(--ink);}
-.folio-account .folio-logout-button:active:not(:disabled){transform:translate(2px,2px);box-shadow:none;}
-.folio-account .folio-logout-button:focus-visible{outline:3px solid var(--ink);outline-offset:5px;}
-.folio-account .folio-logout-button:disabled{opacity:.65;cursor:wait;}
+/* Calendar link row reuses the inked, offset Folio button style of the other settings controls. */
+.folio-calendar p{max-width:60ch;}
+.folio-calendar-link{display:flex;gap:10px;align-items:stretch;flex-wrap:wrap;margin:14px 0 10px;}
+.folio-calendar-link input{flex:1 1 260px;min-width:0;min-height:44px;padding:0 12px;border:1px solid var(--ink);border-radius:5px 8px 6px 7px;background:var(--surface);color:var(--ink);font-size:16px;}
+.folio-calendar .folio-copy-button{min-height:44px;padding:10px 18px;border:1px solid var(--ink);border-radius:5px 8px 6px 7px;background:var(--pink);color:var(--ink);box-shadow:3px 3px 0 var(--ink);font-weight:700;transition:transform .12s,box-shadow .12s;}
+.folio-calendar .folio-copy-button:hover{transform:translate(-1px,-1px);box-shadow:4px 4px 0 var(--ink);}
+.folio-calendar .folio-copy-button:active{transform:translate(2px,2px);box-shadow:none;}
+.folio-calendar .folio-copy-button:focus-visible{outline:3px solid var(--ink);outline-offset:5px;}
+.folio-calendar-note{font-size:14px;opacity:.8;}
 
 /* Touch drag: hold a card or library meal ~0.4s, then drag. Before the hold the browser scrolls natively. */
 @media(hover:none){.meal-chip[role=button],.library-chip{touch-action:manipulation;cursor:pointer;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}}.meal-chip[role=button].is-touch-dragging,.library-chip.is-touch-dragging{opacity:.58;transform:scale(.96);box-shadow:0 0 0 2px var(--green)}.meal-cell.touch-drop-hover,.meal-cell.drag-drop-hover{background:var(--green-soft);box-shadow:inset 0 0 0 2px var(--green)}

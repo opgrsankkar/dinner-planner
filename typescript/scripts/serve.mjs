@@ -10,8 +10,6 @@ const db = resolve(
     process.env.PLANNER_DB ??
     ".local/planner.sqlite",
 );
-if (!(process.env.APP_PASSWORD ?? process.env.PLANNER_PASSWORD))
-  throw new Error("APP_PASSWORD is required");
 if (process.env.TODOIST_MODE && !["live", "fake", "local"].includes(process.env.TODOIST_MODE))
   throw new Error("Invalid TODOIST_MODE");
 if (
@@ -81,7 +79,13 @@ const server = createServer(async (req, res) => {
         for (const item of Array.isArray(value) ? value : [value])
           headers.append(name, item);
     // The bridge proxy owns forwarded protocol. Host is still checked above.
-    const protocol = process.env.COOKIE_SECURE === "true" ? "https:" : "http:";
+    // Caddy terminates TLS, so the public protocol comes from PLANNER_ORIGIN
+    // (COOKIE_SECURE=true is the older spelling). Origin checks compare against it.
+    const protocol =
+      process.env.COOKIE_SECURE === "true" ||
+      (process.env.PLANNER_ORIGIN ?? "").startsWith("https:")
+        ? "https:"
+        : "http:";
     url.protocol = protocol;
     const request = new Request(url, {
       method: req.method,

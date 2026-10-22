@@ -33,7 +33,8 @@ export type Board = {
   library: Meal[];
   slots: Slot[];
   cards: Card[];
-  csrf: string;
+  // Subscription URL for the read-only meals calendar; empty when disabled.
+  calendarUrl?: string;
   settings: Settings;
   receivedRequests: string[];
   projectId: string;

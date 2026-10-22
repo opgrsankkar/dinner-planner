@@ -30,7 +30,6 @@ test("adopt original schema without rewriting data, metadata or journal mode", (
     const db = new Persistence(path);
     assert.equal(db.libraryGet(mealId)?.name, "Old meal");
     assert.equal(db.outboxGet(requestId)?.attempted, "2");
-    assert.equal(db.sessionGet(sessionId)?.csrf, "csrf");
     db.localMealInsert({ id: mealId, body: "{}" });
     db.localReceiptInsert({ id: requestId, body: "{}" });
     db.close();

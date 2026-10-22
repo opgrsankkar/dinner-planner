@@ -12,8 +12,8 @@ This is a single-user pet project for experimenting, not a production-hardening 
 
 - TanStack Start, React, strict TypeScript.
 - Node.js 26, direct SQLite via `node:sqlite`. The user approved replacing Prisma. Do not substitute Node LTS, Drizzle, PostgreSQL, or another stack without user agreement.
-- Todoist remains authoritative for planned meals. SQLite owns settings, reusable meal library, slots, durable outbox, and temporary cache/optimistic state.
-- The user-authorized standalone deployment is an explicit exception: `TODOIST_MODE=local` makes SQLite authoritative for planned meals and uses no Todoist credentials/network. `compose.local.yaml` uses its own persistent volume. Default/live behavior stays Todoist-backed; switching modes does not migrate planned meals.
+- SQLite is authoritative for planned meals (`TODOIST_MODE=local`, user decision 2026-10-22); meals were imported from Todoist with `scripts/import-todoist.ts`. The Todoist provider stays in code but is not deployed.
+- No login: Caddy admits only the home network and tailnet. The server keeps Host and same-Origin write checks. The calendar feed under `/api/calendar/<ICS_TOKEN>.ics` is the only public path.
 - Retain self-hosted Docker Compose and Caddy deployment unless a concrete implementation requirement warrants a scoped change.
 
 ## Team and execution
@@ -37,7 +37,7 @@ This is a single-user pet project for experimenting, not a production-hardening 
 
 - Run clean dependency installation, typecheck, relevant tests, production build/container checks, and real desktop/mobile browser interactions. Check actual drag and non-drag alternatives, settings save/revert, and small per-card spinner/check feedback.
 - Exercise delayed/failed Todoist responses, retries, reloads, and worker restarts. Protect stable request IDs, project ownership, and duplicate-write prevention. Successful DELETE/404 is acknowledgement; do not immediately GET after deletion and misread stale provider state.
-- Keep passwords and Todoist credentials server-side and out of agent logs, prompts, commits, and review output. Retain proportionate authentication and mutation protections.
+- Keep `ICS_TOKEN` and any credentials out of agent logs, prompts, commits, and review output. Retain the Host/Origin mutation protections.
 - Before live cutover, take a consistent SQLite backup, retain the old deployable artifact/configuration, and use a practical data-preserving migration/restore plan. Ensure only one active Todoist mutation worker operates across the cutover. No elaborate enterprise stability programme is required.
 - User has authorized the full migration, required project PR publication, merge, and deployment. Do not wait for their routine code review or ask for approval at every milestone. Escalate only genuine blockers, destructive deviations, or significant product decisions.
 - Verify remote writes with exact GitHub read-back. Verify deployment via live health/authenticated browser behavior, not build output alone. Report what actually works, review outcome, deployed revision, and any remaining limitation.

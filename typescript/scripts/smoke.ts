@@ -1,13 +1,11 @@
 import { chromium } from "@playwright/test";
 import { spawn, spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 const directory = await mkdtemp(join(tmpdir(), "planner-browser-"));
-const password = randomUUID();
 const env = {
   ...process.env,
   TODOIST_MODE: "fake",
@@ -16,7 +14,6 @@ const env = {
   ALLOWED_HOSTS: "127.0.0.1,localhost",
   COOKIE_SECURE: "false",
   DATABASE_PATH: join(directory, "planner.sqlite"),
-  APP_PASSWORD: password,
   PORT: "3100",
   HOST: "127.0.0.1",
   PLANNER_ORIGIN: "http://127.0.0.1:3100",
@@ -94,8 +91,6 @@ try {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("http://127.0.0.1:3100");
-  await page.getByLabel("Password", { exact: true }).fill(password);
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("complementary", { name: "Meal library", exact: true }).waitFor();
   await page.locator(".meal-grid").waitFor();
   // Exercise history classification and integration warnings through synthetic
@@ -459,10 +454,6 @@ try {
   });
   const mobilePage = await mobile.newPage();
   await mobilePage.goto("http://127.0.0.1:3100");
-  await mobilePage.getByLabel("Password", { exact: true }).fill(password);
-  await mobilePage
-    .getByRole("button", { name: "Sign in", exact: true })
-    .click();
   await mobilePage
     .getByRole("button", { name: "Next week", exact: true })
     .click();
@@ -543,18 +534,13 @@ try {
   );
   await page.getByRole("button", { name: "Delete meal", exact: true }).click();
   await dragMeal.waitFor({ state: "detached" });
-  // Log out lives in Settings → Account.
+  // Settings → Calendar shows the feed state instead of the retired Account panel.
   await page.getByRole("link", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Account", exact: true }).click();
-  await page.getByRole("button", { name: "Log out", exact: true }).click();
-  await page.getByRole("button", { name: "Sign in", exact: true }).waitFor();
-  assert.equal(
-    (await context.request.get("http://127.0.0.1:3100/api/board")).status(),
-    401,
-  );
+  await page.getByRole("button", { name: "Calendar", exact: true }).click();
+  await page.getByText("The calendar feed is off.").waitFor();
   assert.deepEqual(errors, []);
   console.log(
-    "HTTP and desktop/mobile browser smoke passed: login, add, Plan, drag placement/move, card move/delete dialog, retry, reload pending, spinner/check, Settings Save/Revert/failure/time ordering, library removal preserving plan, theme, completed history/warnings, navigation, drag delete confirmation, logout.",
+    "HTTP and desktop/mobile browser smoke passed: add, Plan, drag placement/move, card move/delete dialog, retry, reload pending, spinner/check, Settings Save/Revert/failure/time ordering, library removal preserving plan, theme, completed history/warnings, navigation, drag delete confirmation, calendar settings.",
   );
 } finally {
   await browser?.close();
