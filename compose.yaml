@@ -14,8 +14,6 @@ services:
       ALLOWED_HOSTS: meals.happydaysblr.ddns.net,localhost,127.0.0.1
       # Secret path segment for the read-only calendar feed (see Settings → Calendar).
       ICS_TOKEN: ${ICS_TOKEN:-}
-    ports:
-      - "172.17.0.1:8789:8789"
     volumes:
       - ./data:/data
     read_only: true
