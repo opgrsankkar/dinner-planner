@@ -38,6 +38,7 @@ meals.happydaysblr.ddns.net {
 - Changes are recorded in a durable SQLite outbox and applied by a background worker, so the board stays responsive; small per-meal spinner/check indicators show progress. Acknowledged entries older than a week are pruned hourly.
 - Settings → Calendar shows the private subscription link (`/api/calendar/<ICS_TOKEN>.ics`) for Google Calendar or iPhone. It covers two weeks back and three months ahead and refreshes about hourly. Rotate `ICS_TOKEN` in `.env` to revoke the old link.
 - Appearance follows the system by default; Settings offers System, Light and Dark.
+- Installable as an app (PWA): in Safari use Share → Add to Home Screen; in Chrome/Edge use Install app. The service worker only shows an offline page when the planner can't be reached (off the home network or Tailscale); it never caches meals or replays writes. Regenerate the PNG icons from `public/icons/icon.svg` with `npm run icons`; `npm run smoke:pwa` checks installability against a production build.
 
 ## Security and storage
 

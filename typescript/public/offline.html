@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Meal Planner · Offline</title>
+<style>
+:root{--paper:#edbb97;--cream:#fff5e9;--ink:#553449;--muted:#765567}
+@media(prefers-color-scheme:dark){:root{--paper:#352b32;--cream:#4d3b46;--ink:#f5d9df;--muted:#d5b5c3}}
+html,body{margin:0;min-height:100svh;background:var(--paper);color:var(--ink);font-family:Arial,Helvetica,sans-serif}
+main{min-height:100svh;display:grid;place-content:center;justify-items:center;gap:14px;padding:24px;text-align:center}
+svg{width:72px;height:72px}
+h1{margin:0;font-size:24px}
+p{margin:0;max-width:30ch;color:var(--muted);line-height:1.4}
+a{margin-top:6px;padding:11px 20px;border:1px solid var(--ink);border-radius:5px;background:var(--cream);color:var(--ink);font-weight:700;text-decoration:none;box-shadow:3px 3px 0 var(--ink)}
+</style>
+</head>
+<body>
+<main>
+<svg viewBox="141 128 230 242" aria-hidden="true"><rect x="166" y="170" width="200" height="200" rx="16" fill="currentColor"/><rect x="146" y="150" width="200" height="200" rx="16" fill="var(--cream)" stroke="currentColor" stroke-width="10"/><rect x="190" y="128" width="16" height="44" rx="8" fill="currentColor"/><rect x="286" y="128" width="16" height="44" rx="8" fill="currentColor"/><path fill="currentColor" d="M246 186C251 230 262 241 306 250C262 259 251 270 246 314C241 270 230 259 186 250C230 241 241 230 246 186Z"/></svg>
+<h1>Can't reach Meal Planner</h1>
+<p>Connect to the home Wi-Fi or Tailscale, then try again.</p>
+<a href="/">Try again</a>
+</main>
+</body>
+</html>

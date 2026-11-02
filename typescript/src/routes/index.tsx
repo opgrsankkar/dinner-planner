@@ -513,6 +513,8 @@ export function Planner() {
     const apply = () => {
       const resolved = theme === "system" ? (media.matches ? "dark" : "light") : theme;
       document.documentElement.dataset.theme = resolved;
+      for (const meta of document.querySelectorAll('meta[name="theme-color"]'))
+        meta.setAttribute("content", resolved === "dark" ? "#352b32" : "#edbb97");
       setEffectiveTheme(resolved);
     };
     apply();

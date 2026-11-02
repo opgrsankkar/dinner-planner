@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Full-bleed so the same artwork works as a maskable icon; the card stays
+       inside the 80% safe zone. Colours are the Folio light theme tokens. -->
+  <rect width="512" height="512" fill="#edbb97"/>
+  <rect x="166" y="170" width="200" height="200" rx="16" fill="#553449"/>
+  <rect x="146" y="150" width="200" height="200" rx="16" fill="#fff5e9" stroke="#553449" stroke-width="10"/>
+  <rect x="190" y="128" width="16" height="44" rx="8" fill="#553449"/>
+  <rect x="286" y="128" width="16" height="44" rx="8" fill="#553449"/>
+  <path fill="#553449" d="M246 186C251 230 262 241 306 250C262 259 251 270 246 314C241 270 230 259 186 250C230 241 241 230 246 186Z"/>
+</svg>
