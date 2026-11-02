@@ -34,7 +34,11 @@ const mime = {
   ".png": "image/png",
   ".ico": "image/x-icon",
   ".woff2": "font/woff2",
+  ".html": "text/html; charset=utf-8",
+  ".webmanifest": "application/manifest+json",
 };
+// Revalidated on every load so a new deploy's worker and manifest are picked up.
+const revalidated = new Set(["/service-worker.js", "/manifest.webmanifest", "/offline.html"]);
 const server = createServer(async (req, res) => {
   try {
     const host = req.headers.host ?? "";
@@ -68,7 +72,9 @@ const server = createServer(async (req, res) => {
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": url.pathname.startsWith("/assets/")
           ? "public,max-age=31536000,immutable"
-          : "public,max-age=3600",
+          : revalidated.has(url.pathname)
+            ? "no-cache"
+            : "public,max-age=3600",
       });
       res.end(req.method === "HEAD" ? undefined : await readFile(file));
       return;

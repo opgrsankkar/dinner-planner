@@ -18,6 +18,8 @@
     "start": "node scripts/serve.mjs",
     "import:legacy": "tsx scripts/import-legacy.ts",
     "record:slots": "tsx scripts/slot-videos.ts",
+    "icons": "tsx scripts/render-icons.ts",
+    "smoke:pwa": "tsx scripts/pwa-smoke.ts",
     "import:todoist": "node --import tsx scripts/import-todoist.ts"
   },
   "dependencies": {
