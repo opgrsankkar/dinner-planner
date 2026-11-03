@@ -378,3 +378,9 @@ html[data-theme=dark] .add-meal-error{color:#ff8c9c}
 /* iOS zooms the whole page when a focused field's text is under 16px, and the
    zoom persists across the planner/settings navigation; keep fields at 16px. */
 @media(pointer:coarse){input,select,textarea{font-size:16px!important}}
+
+/* A lifted library meal is a copy; keep its source in place. */
+.library-chip.is-touch-dragging{opacity:1;transform:none}
+.touch-drag-ghost{margin:0;max-width:none;height:auto;cursor:grabbing;transition:none;animation:none}
+
+.drag-copy-badge{margin-left:auto;padding:2px 4px;border-radius:3px;background:var(--paper);font-size:10px;font-weight:700}

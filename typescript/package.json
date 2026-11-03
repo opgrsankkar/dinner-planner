@@ -12,6 +12,7 @@
     "test": "node --import tsx --test tests/*.test.ts",
     "db:init": "node --import tsx scripts/init-db.ts",
     "smoke": "tsx scripts/smoke.ts",
+    "smoke:drag": "tsx scripts/drag-smoke.ts",
     "smoke:local": "tsx scripts/local-smoke.ts",
     "check:runtime": "node --import tsx scripts/runtime-check.ts",
     "demo": "mkdir -p .local && npm run db:init && npm run dev",
