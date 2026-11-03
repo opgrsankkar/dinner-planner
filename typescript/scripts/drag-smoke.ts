@@ -95,6 +95,72 @@ try {
   assert.match(await page.locator('#plan-title').innerText(), /^Copy /);
   await page.getByRole('button', { name: 'Copy meal', exact: true }).click();
   await page.waitForFunction(() => document.querySelectorAll('.meal-chip[role=button]').length === 4);
+  // Keep the primary finger down while a second finger taps week arrows.
+  const shiftDate = (date: string, days: number) => {
+    const value = new Date(date + 'T12:00:00Z');
+    value.setUTCDate(value.getUTCDate() + days);
+    return value.toISOString().slice(0, 10);
+  };
+  const firstDate = (await page.locator('.meal-cell').first().getAttribute('data-date'))!;
+  await original.scrollIntoViewIfNeeded();
+  let held = { ...await point(original), id: 1 };
+  const multi = (type: 'touchStart' | 'touchEnd' | 'touchMove', points: {x: number; y: number; id: number}[]) =>
+    cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points });
+  const tapWeek = async (label: string, expected: string) => {
+    const secondary = { ...await point(page.getByRole('button', { name: label, exact: true })), id: 2 };
+    await multi('touchStart', [held, secondary]);
+    await multi('touchEnd', [secondary]);
+    await page.waitForFunction(date => document.querySelector('.meal-cell')?.getAttribute('data-date') === date, expected);
+    assert.equal(await page.locator('.touch-drag-ghost').count(), 1);
+    // No synthesized click should navigate a second time.
+    await page.waitForTimeout(350);
+    assert.equal(await page.locator('.meal-cell').first().getAttribute('data-date'), expected);
+  };
+  await start(original);
+  await page.locator('.touch-drag-ghost').waitFor();
+  // A second finger sliding off an arrow must not turn into a week change.
+  const arrow = { ...await point(page.getByRole('button', { name: 'Next week', exact: true })), id: 2 };
+  const slipped = { ...arrow, x: arrow.x - 25 };
+  await multi('touchStart', [held, arrow]);
+  await multi('touchMove', [held, slipped]);
+  await multi('touchEnd', [slipped]);
+  assert.equal(await page.locator('.meal-cell').first().getAttribute('data-date'), firstDate);
+  assert.equal(await page.locator('.touch-drag-ghost').count(), 1);
+  await tapWeek('Next week', shiftDate(firstDate, 7));
+  await page.waitForFunction(id => !document.querySelector(`[data-card-id="${id}"]`), originalId);
+  await tapWeek('Next week', shiftDate(firstDate, 14));
+  await tapWeek('Previous week', shiftDate(firstDate, 7));
+  const nextCell = page.locator('.meal-cell').first();
+  held = { ...await point(nextCell), id: 1 };
+  await multi('touchMove', [held]);
+  await end();
+  await original.waitFor();
+  assert.equal(await original.evaluate(el => el.closest('td')!.dataset.date), shiftDate(firstDate, 7));
+  await page.waitForFunction(() => document.querySelectorAll('.meal-chip[role=button]').length === 1);
+  // Copy back across a week boundary, retaining the source in the other week.
+  await original.tap();
+  await start(original);
+  held = { ...await point(original), id: 1 };
+  await page.locator('.touch-drag-ghost .drag-copy-badge').waitFor();
+  await tapWeek('Previous week', firstDate);
+  held = { ...await point(page.locator('.meal-cell').first()), id: 1 };
+  await multi('touchMove', [held]);
+  await end();
+  await page.waitForFunction(() => document.querySelectorAll('.meal-chip[role=button]').length === 4);
+  const nextBoard = await (await fetch(origin + '/api/board?week=' + shiftDate(firstDate, 7))).json();
+  assert.equal(nextBoard.cards.filter((card: {id: string}) => card.id === originalId).length, 1);
+  // Releasing the meal before the navigation finger must not switch weeks later.
+  const releaseCard = page.locator('.meal-chip[role=button]').first();
+  held = { ...await point(releaseCard), id: 1 };
+  await start(releaseCard);
+  await page.locator('.touch-drag-ghost').waitFor();
+  const lastArrow = { ...await point(page.getByRole('button', { name: 'Next week', exact: true })), id: 2 };
+  await multi('touchStart', [held, lastArrow]);
+  await multi('touchEnd', [held]);
+  assert.equal(await page.locator('.touch-drag-ghost').count(), 0);
+  await multi('touchEnd', [lastArrow]);
+  await page.waitForTimeout(350);
+  assert.equal(await page.locator('.meal-cell').first().getAttribute('data-date'), firstDate);
   // Mouse dragging retains its existing library-copy and calendar-move behavior.
   const desktop = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const mousePage = await desktop.newPage();
@@ -109,7 +175,7 @@ try {
   await mouseCard.dragTo(mouseTarget);
   await mousePage.waitForFunction(({id, date}) => document.querySelector(`[data-card-id="${id}"]`)?.closest('td')?.dataset.date !== date, { id: mouseId, date: mouseCell });
   await mousePage.waitForFunction(() => document.querySelectorAll('.meal-chip[role=button]').length === 5);
-  console.log('Drag smoke passed: delayed tap, tap-hold copy, hold move, mobile scroll/cancel, keyboard copy alternative.');
+  console.log('Drag smoke passed: delayed tap, tap-hold copy, hold move, mobile scroll/cancel, keyboard copy alternative, two-finger cross-week move/copy.');
 } finally {
   await browser.close();
   await new Promise<void>(resolve => { server.once('exit', () => resolve()); server.kill('SIGTERM'); });

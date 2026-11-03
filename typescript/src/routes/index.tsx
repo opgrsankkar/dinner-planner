@@ -23,6 +23,8 @@ type TouchDrag = {
   x: number;
   y: number;
   identifier: number;
+  navigationTouch: { identifier: number; x: number; y: number; button: HTMLElement; offset: number } | null;
+  removeSourceListeners: () => void;
   timer: ReturnType<typeof setTimeout>;
   active: boolean;
   ghost: HTMLElement | null;
@@ -158,12 +160,14 @@ export function Planner() {
   const dragFinishedAt = useRef(0);
   const dragFinishedCardId = useRef<string | null>(null);
   const touchDrag = useRef<TouchDrag | null>(null);
+  const navigateRef = useRef<(offset: number) => void>(() => {});
   useEffect(() => () => libraryAnimations.current.forEach(animation => animation.cancel()), []);
   useEffect(() => {
     const clearTouchDrag = () => {
       const drag = touchDrag.current;
       if (drag) {
         clearTimeout(drag.timer);
+        drag.removeSourceListeners();
         cancelAnimationFrame(drag.frame);
         drag.ghost?.remove();
         drag.source.classList.remove("is-touch-dragging");
@@ -208,7 +212,6 @@ export function Planner() {
       if (touchDrag.current !== drag || !drag.active) return;
       const zone = 48;
       const speed = (distance: number) => Math.ceil(((zone - Math.max(distance, 0)) / zone) * 14);
-      let scrolled = false;
       const grid = document.querySelector<HTMLElement>(".grid-scroll");
       if (grid) {
         const box = grid.getBoundingClientRect();
@@ -217,22 +220,32 @@ export function Planner() {
         // Only while the finger is over the board: on wide screens the library
         // sits beside it, and starting a drag there must not scroll the days.
         if (drag.y >= box.top && drag.y <= box.bottom && drag.x >= left && drag.x <= right) {
-          const before = grid.scrollLeft;
           if (drag.x < left + zone) grid.scrollLeft -= speed(drag.x - left);
           else if (drag.x > right - zone) grid.scrollLeft += speed(right - drag.x);
-          scrolled ||= grid.scrollLeft !== before;
         }
       }
       const top = Math.max(document.querySelector(".topbar")?.getBoundingClientRect().bottom ?? 0, 0);
-      const before = scrollY;
       if (drag.y < top + zone) scrollBy(0, -speed(drag.y - top));
       else if (drag.y > innerHeight - zone && !touchTarget(drag).overTrash) scrollBy(0, speed(innerHeight - drag.y));
-      scrolled ||= scrollY !== before;
-      if (scrolled) showTouchTarget(drag);
+      // A week change replaces cells even when the viewport has not scrolled.
+      showTouchTarget(drag);
       drag.frame = requestAnimationFrame(() => autoScroll(drag));
     };
     activateTouchDragRef.current = (drag) => {
       drag.active = true;
+      // Touch events keep targeting the source after week navigation removes it.
+      // Listen there as well, and stop bubbling so connected sources run once.
+      const move = (event: TouchEvent) => { event.stopPropagation(); touchMove(event); };
+      const end = (event: TouchEvent) => { event.stopPropagation(); touchEnd(event); };
+      const cancel = (event: TouchEvent) => { event.stopPropagation(); clearTouchDrag(); };
+      drag.source.addEventListener("touchmove", move, { passive: false });
+      drag.source.addEventListener("touchend", end, { passive: false });
+      drag.source.addEventListener("touchcancel", cancel);
+      drag.removeSourceListeners = () => {
+        drag.source.removeEventListener("touchmove", move);
+        drag.source.removeEventListener("touchend", end);
+        drag.source.removeEventListener("touchcancel", cancel);
+      };
       navigator.vibrate?.(10);
       drag.source.classList.add("is-touch-dragging");
       document.body.classList.add("touch-dragging");
@@ -274,17 +287,34 @@ export function Planner() {
       if (cardId !== pendingTap.current?.cardId) cancelPendingTap();
     };
     const touchStart = (event: TouchEvent) => {
-      if (event.touches.length > 1) {
-        cancelPendingTap();
-        clearTouchDrag();
-      }
+      if (event.touches.length <= 1) return;
+      cancelPendingTap();
+      const drag = touchDrag.current;
+      if (!drag?.active) { clearTouchDrag(); return; }
+      // Secondary touches are handled here, not as clicks or new meal drags.
+      event.preventDefault();
+      event.stopPropagation();
+      drag.navigationTouch = null;
+      if (event.touches.length !== 2) return;
+      const touch = Array.from(event.changedTouches).find((touch) => touch.identifier !== drag.identifier);
+      const button = touch && (touch.target as Element).closest<HTMLElement>("[data-drag-week]");
+      if (touch && button) drag.navigationTouch = {
+        identifier: touch.identifier, x: touch.clientX, y: touch.clientY,
+        button, offset: Number(button.dataset.dragWeek),
+      };
     };
     const touchMove = (event: TouchEvent) => {
       const drag = touchDrag.current;
       if (!drag) return;
-      if (event.touches.length !== 1) {
+      if (!drag.active && event.touches.length !== 1) {
         clearTouchDrag();
         return;
+      }
+      const navigation = drag.navigationTouch;
+      if (navigation) {
+        const secondary = Array.from(event.touches).find((touch) => touch.identifier === navigation.identifier);
+        if (!secondary || Math.hypot(secondary.clientX - navigation.x, secondary.clientY - navigation.y) > 10)
+          drag.navigationTouch = null;
       }
       const touch = Array.from(event.touches).find((item) => item.identifier === drag.identifier);
       if (!touch) {
@@ -310,11 +340,18 @@ export function Planner() {
       const initiatingTouchEnded = Array.from(event.changedTouches).some((touch) => touch.identifier === drag.identifier);
       const initiatingTouchStillActive = Array.from(event.touches).some((touch) => touch.identifier === drag.identifier);
       if (!initiatingTouchEnded) {
-        if (event.touches.length !== 1 || !initiatingTouchStillActive) clearTouchDrag();
-        return;
-      }
-      if (event.touches.length) {
-        clearTouchDrag();
+        if (!initiatingTouchStillActive) { clearTouchDrag(); return; }
+        if (drag.active) {
+          event.preventDefault();
+          const navigation = drag.navigationTouch;
+          const ended = navigation && Array.from(event.changedTouches).find((touch) => touch.identifier === navigation.identifier);
+          if (ended) {
+            drag.navigationTouch = null;
+            if (Math.hypot(ended.clientX - navigation.x, ended.clientY - navigation.y) <= 10 &&
+                document.elementFromPoint(ended.clientX, ended.clientY)?.closest("[data-drag-week]") === navigation.button)
+              navigateRef.current(navigation.offset);
+          }
+        }
         return;
       }
       const touch = Array.from(event.changedTouches).find((item) => item.identifier === drag.identifier)!;
@@ -362,7 +399,7 @@ export function Planner() {
     window.addEventListener("drop", finishPlannedDrag, true);
     window.addEventListener("blur", finishPlannedDrag);
     window.addEventListener("pointerdown", pointerStart, true);
-    window.addEventListener("touchstart", touchStart, true);
+    window.addEventListener("touchstart", touchStart, { capture: true, passive: false });
     window.addEventListener("touchmove", touchMove, { passive: false });
     window.addEventListener("touchend", touchEnd, { passive: false });
     window.addEventListener("touchcancel", cancelTouchDrag);
@@ -439,6 +476,8 @@ export function Planner() {
     }
   }
   const [week, setWeek] = useState(monday);
+  const weekRef = useRef(week);
+  weekRef.current = week;
   const isCurrentWeek = week === monday();
   const [target, setTarget] = useState<Meal | null>(null);
   const [day, setDay] = useState(week);
@@ -475,6 +514,7 @@ export function Planner() {
     const response = await fetch(`/api/board?week=${week}`);
     const result = await response.json();
     if (!response.ok) throw new Error(result.error);
+    if (weekRef.current !== week) return;
     const next = result as Board;
     for (const requestId of next.receivedRequests) {
       local.current.delete(requestId);
@@ -679,9 +719,9 @@ export function Planner() {
       (previous) =>
         previous && {
           ...previous,
-          cards: previous.cards.map((item) =>
-            item.id === card.id ? pending : item,
-          ),
+          cards: previous.cards.some((item) => item.id === card.id)
+            ? previous.cards.map((item) => item.id === card.id ? pending : item)
+            : kind === "move" ? [...previous.cards, pending] : previous.cards,
         },
     );
     await sendIntent(requestId);
@@ -705,6 +745,8 @@ export function Planner() {
       x: touch.clientX,
       y: touch.clientY,
       identifier: touch.identifier,
+      navigationTouch: null,
+      removeSourceListeners: () => {},
       timer: setTimeout(() => {
         if (touchDrag.current === drag) activateTouchDragRef.current(drag);
       }, PICKUP_HOLD_MS),
@@ -731,10 +773,13 @@ export function Planner() {
     };
   });
   function navigate(offset: number) {
-    const date = new Date(`${week}T12:00:00Z`);
-    date.setUTCDate(date.getUTCDate() + offset);
-    setWeek(iso(date));
+    setWeek((current) => {
+      const date = new Date(`${current}T12:00:00Z`);
+      date.setUTCDate(date.getUTCDate() + offset);
+      return iso(date);
+    });
   }
+  navigateRef.current = navigate;
   async function copyCard(card: Card, date: string, slot: Slot) {
     try {
       const meal = boardRef.current?.library.find((meal) => meal.name.toLowerCase() === card.name.toLowerCase())
@@ -807,6 +852,7 @@ export function Planner() {
             <button
               className="icon-button"
               aria-label="Previous week"
+              data-drag-week={-7}
               onClick={() => navigate(-7)}
             >
               ‹
@@ -815,6 +861,7 @@ export function Planner() {
             <button
               className="icon-button"
               aria-label="Next week"
+              data-drag-week={7}
               onClick={() => navigate(7)}
             >
               ›
@@ -1362,7 +1409,7 @@ export function Planner() {
           </h2>
           <p>
             {moving
-              ? "Choose a day and meal slot. Hold and drag to move; tap, then hold and drag to copy."
+              ? "Choose a day and meal slot. Hold and drag to move; tap, then hold and drag to copy. While holding a meal, tap a week arrow with another finger to change weeks."
               : planDefaultAvailable
                 ? "Choose a day and meal slot. You can also drag meals on the planner."
                 : "No eligible empty slot is available in this displayed week. Choose a day and slot manually, or view another week."}
