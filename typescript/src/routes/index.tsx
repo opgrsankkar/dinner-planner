@@ -9,10 +9,14 @@ import { orderLibrary } from "../library-order";
 import { isPastSlot } from "../past-slot";
 import { requestId as newRequestId } from "../request-id";
 import { libraryDragPreview, sameLibraryDragPreview, type DragPreview } from "../drag-preview";
+// A second press inside this window turns the next hold into a copy.
+const TAP_WINDOW_MS = 300;
+const PICKUP_HOLD_MS = 250;
 export const Route = createFileRoute("/")({ component: Planner });
 type TouchDragItem = { kind: "planned"; card: Card } | { kind: "library"; meal: Meal };
 type TouchDrag = {
   item: TouchDragItem;
+  copy: boolean;
   source: HTMLElement;
   startX: number;
   startY: number;
@@ -126,6 +130,10 @@ function fitSlotRows() {
 }
 export function Planner() {
   const settingsPage = useLocation().pathname === "/settings";
+  const [copying, setCopying] = useState<Card | null>(null);
+  const pendingTap = useRef<{ cardId: string; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const touchPress = useRef(false);
+  const copyRef = useRef<(card: Card, date: string, slot: Slot) => Promise<void>>(async () => {});
   const [moving, setMoving] = useState<Card | null>(null);
   const [dragPreview, setDragPreview] = useState<DragPreview | null>(null);
   const draggedLibraryMeal = useRef<Meal | null>(null);
@@ -180,7 +188,7 @@ export function Planner() {
       const target = document.elementFromPoint(drag.x, drag.y);
       return {
         cell: target?.closest<HTMLElement>(".meal-cell[data-date][data-slot-id]") ?? null,
-        overTrash: drag.item.kind === "planned" && !!target?.closest(".trash-drop-target"),
+        overTrash: !drag.copy && drag.item.kind === "planned" && !!target?.closest(".trash-drop-target"),
       };
     };
     const showTouchTarget = (drag: TouchDrag) => {
@@ -230,23 +238,46 @@ export function Planner() {
       document.body.classList.add("touch-dragging");
       if (drag.item.kind === "planned") {
         dialogTrigger.current = drag.source;
-        document.body.classList.add("planner-dragging");
+        if (!drag.copy) document.body.classList.add("planner-dragging");
       } else {
         libraryDragged.current = true;
       }
-      const ghost = document.createElement("div");
-      ghost.className = "touch-drag-ghost";
+      const ghost = drag.source.cloneNode(true) as HTMLElement;
+      ghost.removeAttribute("id");
+      ghost.removeAttribute("role");
+      ghost.tabIndex = -1;
+      ghost.inert = true;
+      ghost.removeAttribute("data-card-id");
+      ghost.removeAttribute("draggable");
+      ghost.classList.remove("is-touch-dragging");
+      ghost.classList.add("touch-drag-ghost");
+      if (drag.copy) {
+        const badge = document.createElement("span");
+        badge.className = "drag-copy-badge";
+        badge.textContent = "Copy";
+        ghost.append(badge);
+      }
       ghost.setAttribute("aria-hidden", "true");
-      ghost.textContent = drag.item.kind === "planned" ? drag.item.card.name : drag.item.meal.name;
-      ghost.style.width = `${Math.min(drag.source.getBoundingClientRect().width, 160)}px`;
+      ghost.style.width = `${Math.min(drag.source.getBoundingClientRect().width, 220)}px`;
       document.body.append(ghost);
       drag.ghost = ghost;
       moveGhost(drag);
       showTouchTarget(drag);
       drag.frame = requestAnimationFrame(() => autoScroll(drag));
     };
+    const cancelPendingTap = () => {
+      if (pendingTap.current) clearTimeout(pendingTap.current.timer);
+      pendingTap.current = null;
+    };
+    const pointerStart = (event: PointerEvent) => {
+      const cardId = (event.target as Element).closest?.("[data-card-id]")?.getAttribute("data-card-id");
+      if (cardId !== pendingTap.current?.cardId) cancelPendingTap();
+    };
     const touchStart = (event: TouchEvent) => {
-      if (event.touches.length > 1 && touchDrag.current) clearTouchDrag();
+      if (event.touches.length > 1) {
+        cancelPendingTap();
+        clearTouchDrag();
+      }
     };
     const touchMove = (event: TouchEvent) => {
       const drag = touchDrag.current;
@@ -263,6 +294,8 @@ export function Planner() {
       if (!drag.active) {
         // Moving before the hold completes is a normal scroll; leave it to the browser.
         if (Math.hypot(touch.clientX - drag.startX, touch.clientY - drag.startY) > 10) clearTouchDrag();
+        drag.x = touch.clientX;
+        drag.y = touch.clientY;
         return;
       }
       event.preventDefault();
@@ -305,7 +338,8 @@ export function Planner() {
         setDeleteTarget(card);
         deleteDialog.current?.showModal();
       } else if (cell && slot && card.state === "saved") {
-        if (cell.dataset.date !== card.date || slot.id !== card.slotId)
+        if (drag.copy) void copyRef.current(card, cell.dataset.date!, slot);
+        else if (cell.dataset.date !== card.date || slot.id !== card.slotId)
           void changeRef.current(card, "move", cell.dataset.date, slot);
       }
     };
@@ -315,6 +349,8 @@ export function Planner() {
       if (touchDrag.current) event.preventDefault();
     };
     const finishPlannedDrag = () => {
+      if (pendingTap.current) clearTimeout(pendingTap.current.timer);
+      pendingTap.current = null;
       clearTouchDrag();
       draggedLibraryMeal.current = null;
       setDragPreview(null);
@@ -325,6 +361,7 @@ export function Planner() {
     window.addEventListener("dragend", finishPlannedDrag, true);
     window.addEventListener("drop", finishPlannedDrag, true);
     window.addEventListener("blur", finishPlannedDrag);
+    window.addEventListener("pointerdown", pointerStart, true);
     window.addEventListener("touchstart", touchStart, true);
     window.addEventListener("touchmove", touchMove, { passive: false });
     window.addEventListener("touchend", touchEnd, { passive: false });
@@ -335,6 +372,7 @@ export function Planner() {
       window.removeEventListener("dragend", finishPlannedDrag, true);
       window.removeEventListener("drop", finishPlannedDrag, true);
       window.removeEventListener("blur", finishPlannedDrag);
+      window.removeEventListener("pointerdown", pointerStart, true);
       window.removeEventListener("touchstart", touchStart, true);
       window.removeEventListener("touchmove", touchMove);
       window.removeEventListener("touchend", touchEnd);
@@ -655,8 +693,12 @@ export function Planner() {
     if (event.touches.length !== 1) return;
     if (item.kind === "planned" && item.card.state !== "saved") return;
     const touch = event.touches[0]!;
+    const copy = item.kind === "planned" && pendingTap.current?.cardId === item.card.id;
+    if (pendingTap.current) clearTimeout(pendingTap.current.timer);
+    pendingTap.current = null;
     const drag: TouchDrag = {
       item,
+      copy,
       source,
       startX: touch.clientX,
       startY: touch.clientY,
@@ -665,7 +707,7 @@ export function Planner() {
       identifier: touch.identifier,
       timer: setTimeout(() => {
         if (touchDrag.current === drag) activateTouchDragRef.current(drag);
-      }, 400),
+      }, PICKUP_HOLD_MS),
       active: false,
       ghost: null,
       frame: 0,
@@ -693,8 +735,19 @@ export function Planner() {
     date.setUTCDate(date.getUTCDate() + offset);
     setWeek(iso(date));
   }
+  async function copyCard(card: Card, date: string, slot: Slot) {
+    try {
+      const meal = boardRef.current?.library.find((meal) => meal.name.toLowerCase() === card.name.toLowerCase())
+        ?? await createLibraryMeal(card.name);
+      await place(meal, date, slot);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not copy meal");
+    }
+  }
+  copyRef.current = copyCard;
   function openPlan(meal: Meal, trigger: HTMLButtonElement) {
     dialogTrigger.current = trigger;
+    setCopying(null);
     setMoving(null);
     setTarget(meal);
     const placement = defaultPlanPlacement(week, board!.slots, board!.cards, new Date());
@@ -704,7 +757,10 @@ export function Planner() {
     dialog.current?.showModal();
   }
   function openCardActions(card: Card, trigger: HTMLDivElement) {
+    if (pendingTap.current) clearTimeout(pendingTap.current.timer);
+    pendingTap.current = null;
     dialogTrigger.current = trigger;
+    setCopying(null);
     setTarget(card);
     setMoving(card);
     setDay(card.date);
@@ -969,12 +1025,12 @@ export function Planner() {
                                   }
                                   aria-label={
                                     card.state === "saved"
-                                      ? `Move or delete ${card.name}`
+                                      ? `Move, copy or delete ${card.name}`
                                       : undefined
                                   }
                                   aria-description={
                                     card.state === "saved"
-                                      ? "Tap to choose an action, or hold for a moment and drag to move or delete."
+                                      ? "Tap for actions. Hold and drag to move. Tap, then hold and drag to copy."
                                       : undefined
                                   }
                                   aria-haspopup={
@@ -988,7 +1044,7 @@ export function Planner() {
                                     !coarsePointer
                                   }
                                   // A drag's leftover click has no new press; a deliberate tap does.
-                                  onPointerDown={() => { dragFinishedCardId.current = null; }}
+                                  onPointerDown={(e) => { touchPress.current = e.pointerType === "touch"; dragFinishedCardId.current = null; }}
                                   onTouchStart={(e) => startTouchDrag({ kind: "planned", card }, e.currentTarget, e)}
                                   onClick={(e) => {
                                     if (
@@ -998,8 +1054,15 @@ export function Planner() {
                                       dragFinishedCardId.current = null;
                                       return;
                                     }
-                                    if (card.state === "saved")
-                                      openCardActions(card, e.currentTarget);
+                                    if (card.state !== "saved") return;
+                                    if (touchPress.current && e.detail !== 0) {
+                                      const source = e.currentTarget;
+                                      if (pendingTap.current) clearTimeout(pendingTap.current.timer);
+                                      pendingTap.current = { cardId: card.id, timer: setTimeout(() => {
+                                        pendingTap.current = null;
+                                        openCardActions(card, source);
+                                      }, TAP_WINDOW_MS) };
+                                    } else openCardActions(card, e.currentTarget);
                                   }}
                                   onKeyDown={(e) => {
                                     if (
@@ -1199,7 +1262,8 @@ export function Planner() {
                     className="library-chip"
                     type="button"
                     aria-label={`Plan ${meal.name}`}
-                    title={`Click to plan ${meal.name}, or drag to a calendar slot`}
+                    title={`Tap to plan ${meal.name}, or hold briefly and drag a copy to a calendar slot`}
+                    aria-description="Tap to choose a day and slot. Hold briefly to pick up a copy, then drag and release to plan it."
                     key={meal.id}
                     draggable={!coarsePointer}
                     onPointerDown={() => { libraryDragged.current = false; }}
@@ -1287,17 +1351,18 @@ export function Planner() {
             if (target) {
               dialog.current?.close();
               const slot = board.slots.find((s) => s.id === slotId)!;
-              if (moving) await change(moving, "move", day, slot);
+              if (copying) await copyCard(copying, day, slot);
+              else if (moving) await change(moving, "move", day, slot);
               else await place(target, day, slot);
             }
           }}
         >
           <h2 id="plan-title" tabIndex={-1}>
-            {moving ? "Move" : "Plan"} {target?.name}
+            {copying ? "Copy" : moving ? "Move" : "Plan"} {target?.name}
           </h2>
           <p>
             {moving
-              ? "Choose a day and meal slot. You can also drag meals on the planner."
+              ? "Choose a day and meal slot. Hold and drag to move; tap, then hold and drag to copy."
               : planDefaultAvailable
                 ? "Choose a day and meal slot. You can also drag meals on the planner."
                 : "No eligible empty slot is available in this displayed week. Choose a day and slot manually, or view another week."}
@@ -1329,6 +1394,10 @@ export function Planner() {
             ))}
           </select>
           <div className="dialog-actions">
+            {moving && <button type="button" className="secondary-button" onClick={() => {
+              setCopying(moving);
+              setMoving(null);
+            }}>Copy meal</button>}
             {moving && (
               <button
                 className="danger-button"
@@ -1346,7 +1415,7 @@ export function Planner() {
               Cancel
             </button>
             <button className="primary-button" disabled={!moving && (!day || !slotId)}>
-              {moving ? "Move meal" : "Plan meal"}
+              {copying ? "Copy meal" : moving ? "Move meal" : "Plan meal"}
             </button>
           </div>
         </form>
