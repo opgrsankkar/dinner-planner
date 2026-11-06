@@ -1,10 +1,12 @@
 import { sortSlotsByTime } from "../slot-order";
 import { isPastSlot } from "../past-slot";
 import { Persistence } from "./persistence";
+import { findMealByName, maxMealAliases, maxMealNameLength, mealNameKey } from "../meal-names";
 import { randomUUID } from "node:crypto";
 import type {
   Board,
   Card,
+  Meal,
   Placement,
   Mutation,
   Settings,
@@ -25,6 +27,12 @@ async function findTask(todoist: Todoist, taskId: string, projectId: string) {
       ) ?? null;
 }
 const settingsId = "00000000-0000-4000-8000-000000000001";
+function cleanMealName(name: string, label = "Meal name") {
+  name = name.trim().replace(/\s+/g, " ");
+  if (!name || name.length > maxMealNameLength)
+    throw new Error(`${label} must be 1–${maxMealNameLength} characters`);
+  return name;
+}
 export class Store {
   readonly db;
   private writing: Promise<unknown> = Promise.resolve();
@@ -67,18 +75,21 @@ export class Store {
       }),
     );
   }
-  async addLibrary(name: string) {
-    name = name.trim().replace(/\s+/g, " ");
-    if (!name || name.length > 120)
-      throw new Error("Use a meal name between 1 and 120 characters");
+  // Library rows with their alternate names, in alias order.
+  private libraryMeals(db: Persistence = this.db): Meal[] {
+    const aliases = new Map<string, string[]>();
+    for (const row of db.libraryAliasAll())
+      aliases.set(row.mealId, [...(aliases.get(row.mealId) ?? []), row.name]);
+    return db.libraryAll().map((meal) => ({ ...meal, aliases: aliases.get(meal.id) ?? [] }));
+  }
+  async addLibrary(name: string): Promise<Meal> {
+    name = cleanMealName(name);
     return this.write(() =>
       this.db.transaction((tx) => {
-        const existing = (tx.libraryAll()).find(
-          (meal) => meal.name.toLowerCase() === name.toLowerCase(),
-        );
-        return (
-          existing ?? tx.libraryInsert({ id: randomUUID(), name })
-        );
+        // A name that is already a meal's name or alternate name is that meal.
+        const existing = findMealByName(this.libraryMeals(tx), name);
+        if (existing) return existing;
+        return { ...tx.libraryInsert({ id: randomUUID(), name }), aliases: [] };
       }),
     );
   }
@@ -278,7 +289,7 @@ export class Store {
         integrationError,
         projectId: project.id,
         receivedRequests: operations.map((row) => row.id),
-        library: sort(this.db.libraryAll(), settings.libraryOrder),
+        library: sort(this.libraryMeals(), settings.libraryOrder),
         slots: sortSlotsByTime(sort(slots, settings.slotOrder)),
         cards,
       };
@@ -317,17 +328,35 @@ export class Store {
         value: JSON.stringify(settings),
       });
   }
-  async renameLibrary(mealId: string, name: string) {
+  // Renames a library meal and, when given, replaces its alternate names.
+  // Planned meals keep the name they were planned with.
+  async renameLibrary(mealId: string, name: string, aliases?: string[]) {
     if (!uuidPattern.test(mealId)) throw new Error("Invalid meal ID");
-    name = name.trim();
-    if (!name || name.length > 120) throw new Error("Meal name must be 1–120 characters");
-    return this.write(async () => {
-      const meals = this.db.libraryAll();
-      if (!meals.some(meal => meal.id === mealId)) throw new Error("Meal not found");
-      if (meals.some(meal => meal.id !== mealId && meal.name.toLowerCase() === name.toLowerCase()))
-        throw new Error("A meal with this name already exists");
-      this.db.libraryUpdate(mealId, { name });
-    });
+    name = cleanMealName(name);
+    const key = mealNameKey(name);
+    const cleaned = aliases
+      ?.map((alias) => cleanMealName(alias, "Alternate names"))
+      .filter((alias, index, all) =>
+        mealNameKey(alias) !== key &&
+        all.findIndex((other) => mealNameKey(other) === mealNameKey(alias)) === index);
+    if (cleaned && cleaned.length > maxMealAliases)
+      throw new Error(`Use at most ${maxMealAliases} alternate names`);
+    return this.write(() =>
+      this.db.transaction((tx) => {
+        const meals = this.libraryMeals(tx);
+        if (!meals.some((meal) => meal.id === mealId)) throw new Error("Meal not found");
+        for (const meal of meals) {
+          if (meal.id === mealId) continue;
+          if (mealNameKey(meal.name) === key) throw new Error("A meal with this name already exists");
+          for (const taken of [meal.name, ...meal.aliases])
+            for (const wanted of [name, ...(cleaned ?? [])])
+              if (mealNameKey(taken) === mealNameKey(wanted))
+                throw new Error(`“${wanted}” is already a name for ${meal.name}`);
+        }
+        tx.libraryUpdate(mealId, { name });
+        if (cleaned) tx.libraryAliasReplace(mealId, cleaned);
+      }),
+    );
   }
   async removeLibrary(mealId: string) {
     if (!uuidPattern.test(mealId)) throw new Error("Invalid meal ID");

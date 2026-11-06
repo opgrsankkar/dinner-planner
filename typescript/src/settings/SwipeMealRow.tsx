@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Meal } from "../types";
+import { maxMealAliases, maxMealNameLength, parseAliases } from "../meal-names";
 
 export function SwipeMealRow({ meal, hint, removing, remove, action }: {
   meal: Meal; hint: boolean; removing: boolean; remove: () => void;
@@ -8,6 +9,7 @@ export function SwipeMealRow({ meal, hint, removing, remove, action }: {
   const [offset, setOffset] = useState(0);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  const [aliasDraft, setAliasDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   // Touch-first devices keep the swipe affordance and hint; a fine primary
@@ -43,10 +45,13 @@ export function SwipeMealRow({ meal, hint, removing, remove, action }: {
   async function save() {
     if (busy.current) return;
     const name = draft.trim();
-    if (!name || name.length > 120) { setError("Use a meal name between 1 and 120 characters."); return; }
+    if (!name || name.length > maxMealNameLength) { setError(`Use a meal name between 1 and ${maxMealNameLength} characters.`); return; }
+    const aliases = parseAliases(aliasDraft);
+    if (aliases.some(alias => alias.length > maxMealNameLength)) { setError(`Keep each other name under ${maxMealNameLength + 1} characters.`); return; }
+    if (aliases.length > maxMealAliases) { setError(`Use at most ${maxMealAliases} other names.`); return; }
     busy.current = true; setSaving(true); setError("");
     try {
-      if (await action("/api/library/rename", { mealId: meal.id, name })) {
+      if (await action("/api/library/rename", { mealId: meal.id, name, aliases })) {
         setEditing(false); setOffset(0);
         requestAnimationFrame(() => row.current?.focus());
       }
@@ -56,9 +61,9 @@ export function SwipeMealRow({ meal, hint, removing, remove, action }: {
   return <div ref={row} className={`folio-library-row${editing ? " is-editing" : ""}`}
     data-meal-id={meal.id} data-reveal={offset > 0 ? "edit" : offset < 0 ? "delete" : "closed"}
     tabIndex={0}
-    aria-label={coarsePointer
-      ? `${meal.name}. Swipe right to edit, left to delete. Use Tab for actions.`
-      : `${meal.name}. Use the edit or remove buttons.`}
+    aria-label={`${meal.name}${meal.aliases.length ? `, also called ${meal.aliases.join(", ")}` : ""}. ${coarsePointer
+      ? "Swipe right to edit, left to delete. Use Tab for actions."
+      : "Use the edit or remove buttons."}`}
     onFocus={stopHint} onKeyDown={event => {
       if (event.target !== event.currentTarget) return;
       if (event.key === "Escape") setOffset(0);
@@ -93,14 +98,21 @@ export function SwipeMealRow({ meal, hint, removing, remove, action }: {
         <input autoFocus aria-label={`New name for ${meal.name}`} value={draft} disabled={saving}
           onChange={event => { setDraft(event.target.value); setError(""); }}
           onKeyDown={event => { if (event.key === "Escape" && !saving) { setEditing(false); row.current?.focus(); } }} />
+        <input aria-label={`Other names for ${meal.name}, separated by commas`} placeholder="Other names, separated by commas"
+          value={aliasDraft} disabled={saving}
+          onChange={event => { setAliasDraft(event.target.value); setError(""); }}
+          onKeyDown={event => { if (event.key === "Escape" && !saving) { setEditing(false); row.current?.focus(); } }} />
         <button type="submit" disabled={saving}>{saving ? "Saving…" : "Save"}</button>
         <button type="button" disabled={saving} onClick={() => { setEditing(false); row.current?.focus(); }}>Cancel</button>
         {error && <span role="alert">{error}</span>}
-      </form> : <span className="folio-library-name">{meal.name}</span>}
+      </form> : <span className="folio-library-name">
+        {meal.name}
+        {meal.aliases.length > 0 && <small className="folio-library-aliases">Also {meal.aliases.join(" · ")}</small>}
+      </span>}
     </div>
     <button type="button" className="folio-library-edit folio-library-swipe-action"
       aria-label={`Edit ${meal.name}`} disabled={saving || removing}
-      onClick={() => { stopHint(); setDraft(meal.name); setError(""); setEditing(true); setOffset(0); }}>
+      onClick={() => { stopHint(); setDraft(meal.name); setAliasDraft(meal.aliases.join(", ")); setError(""); setEditing(true); setOffset(0); }}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m16 3 5 5-12 12-6 1 1-6ZM14 5l5 5" /></svg>
     </button>
     <button type="button" className="folio-library-remove folio-library-swipe-action"

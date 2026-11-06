@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { SwipeMealRow } from "./SwipeMealRow";
 import type { Meal } from "../types";
+import { findMealByName, searchMeal } from "../meal-names";
 import "./MealLibrarySettings.css";
 
 export interface MealLibrarySettingsProps {
@@ -58,9 +59,12 @@ export function MealLibrarySettings({ library, action }: MealLibrarySettingsProp
     setFeedback("");
     setError("");
     try {
+      const existing = findMealByName(library, trimmed);
       if (await action("/api/library", { name: trimmed }) === true) {
         setSearch("");
-        setFeedback(`Added ${trimmed} to the meal library.`);
+        setFeedback(existing
+          ? `${trimmed} is already in the meal library${existing.name === trimmed ? "" : ` as ${existing.name}`}.`
+          : `Added ${trimmed} to the meal library.`);
       }
     } catch (error) {
       setError(error instanceof Error ? error.message : "Could not add meal. Please try again.");
@@ -107,7 +111,7 @@ export function MealLibrarySettings({ library, action }: MealLibrarySettingsProp
         </button>
       </form>
       <div className="folio-library-list">
-        {library.filter(meal => meal.name.toLowerCase().includes(search.trim().toLowerCase())).map(meal => (
+        {library.filter(meal => searchMeal(meal, search).match).map(meal => (
           <SwipeMealRow key={meal.id} meal={meal} hint={meal.id === library[0]?.id}
             removing={removing.includes(meal.id)} remove={() => void removeMeal(meal)} action={action} />
         ))}

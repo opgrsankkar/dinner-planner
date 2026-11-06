@@ -328,6 +328,7 @@ html[data-theme=dark] .library-feedback[role=alert]{color:#ff8c9c}
 html[data-theme=dark] .add-meal-error{color:#ff8c9c}
 .add-meal-options{display:grid;align-content:start;gap:6px;flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain;margin:0;padding:2px 4px 4px 2px;list-style:none}
 .add-meal-options button{width:100%;min-height:44px;padding:9px 12px;border:1px solid var(--line);border-radius:5px;background:var(--surface-2);color:var(--ink);font-family:inherit;font-size:14px;font-weight:700;line-height:1.3;text-align:left;overflow-wrap:anywhere;cursor:pointer}
+.meal-alias-match{display:block;color:var(--muted);font-size:.86em;font-weight:500}
 .add-meal-options .add-meal-create{border:1px dashed var(--ink);background:transparent}
 .add-meal-options button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 .add-meal-dialog .dialog-actions{flex:none}

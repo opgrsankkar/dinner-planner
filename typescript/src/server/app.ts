@@ -187,8 +187,15 @@ export async function handle(
         if (theme !== "system" && theme !== "light" && theme !== "dark")
           throw new Error("Invalid theme");
         await store.saveTheme(theme);
-      } else if (url.pathname === "/api/library/rename")
-        await store.renameLibrary(string("mealId"), string("name"));
+      } else if (url.pathname === "/api/library/rename") {
+        const aliases = fields.aliases;
+        if (
+          aliases !== undefined &&
+          (!Array.isArray(aliases) || !aliases.every((alias) => typeof alias === "string"))
+        )
+          throw new Error("Invalid aliases");
+        await store.renameLibrary(string("mealId"), string("name"), aliases);
+      }
       else if (url.pathname === "/api/library/remove")
         await store.removeLibrary(string("mealId"));
       else if (url.pathname === "/api/library/shuffle") await store.shuffle();

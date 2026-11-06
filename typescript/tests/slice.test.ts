@@ -791,3 +791,45 @@ test("rename API requires same origin and validates fields", async () => {
     assert.equal((await f.store.board(f.provider)).library.find(meal => meal.id === body.mealId)?.name, body.name);
   } finally { await f.close(); }
 });
+
+test("alternate meal names save, stay unique, find the meal and go with it", async () => {
+  const f = await fixture();
+  try {
+    const [meal, other] = (await f.store.board(f.provider)).library;
+    await f.store.renameLibrary(meal.id, meal.name, [" Thayir  sadam ", "thayir sadam", meal.name.toUpperCase(), "Mosaru anna"]);
+    let library = (await f.store.board(f.provider)).library;
+    assert.deepEqual(library.find(item => item.id === meal.id)?.aliases, ["Thayir sadam", "Mosaru anna"]);
+    // A rename without aliases keeps them; adding an alias returns its meal.
+    await f.store.renameLibrary(meal.id, "Curd rice");
+    assert.deepEqual((await f.store.addLibrary("THAYIR SADAM")).id, meal.id);
+    library = (await f.store.board(f.provider)).library;
+    assert.equal(library.length, 3);
+    assert.deepEqual(library.find(item => item.id === meal.id), { id: meal.id, name: "Curd rice", aliases: ["Thayir sadam", "Mosaru anna"] });
+    await assert.rejects(f.store.renameLibrary(other.id, other.name, ["mosaru anna"]), /already a name for Curd rice/);
+    await assert.rejects(f.store.renameLibrary(other.id, "Thayir sadam"), /already a name for Curd rice/);
+    await assert.rejects(f.store.renameLibrary(other.id, other.name, ["Curd rice"]), /already a name for Curd rice/);
+    await assert.rejects(f.store.renameLibrary(meal.id, "Curd rice", ["x".repeat(121)]), /Alternate names must be 1–120/);
+    await assert.rejects(f.store.renameLibrary(meal.id, "Curd rice", Array.from({ length: 11 }, (_, i) => `Name ${i}`)), /at most 10/);
+    await f.store.renameLibrary(meal.id, "Curd rice", []);
+    assert.deepEqual((await f.store.board(f.provider)).library.find(item => item.id === meal.id)?.aliases, []);
+    await f.store.renameLibrary(meal.id, "Curd rice", ["Thayir sadam"]);
+    await f.store.removeLibrary(meal.id);
+    assert.equal(f.store.db.libraryAliasAll().length, 0);
+    assert.notEqual((await f.store.addLibrary("Thayir sadam")).id, meal.id);
+  } finally { await f.close(); }
+});
+
+test("rename API accepts alternate names and rejects malformed ones", async () => {
+  const f = await fixture();
+  const app: App = { store: f.store, todoist: f.provider, worker: f.worker, origin: "http://localhost:3000", calendarToken: "" };
+  const request = (body: unknown) => new Request(app.origin + "/api/library/rename", {
+    method: "POST", headers: { origin: app.origin, "content-type": "application/json" }, body: JSON.stringify(body),
+  });
+  const body = { mealId: f.input.mealId, name: "Curd rice" };
+  try {
+    assert.equal((await handle(request({ ...body, aliases: "Thayir sadam" }), app)).status, 400);
+    assert.equal((await handle(request({ ...body, aliases: [3] }), app)).status, 400);
+    assert.equal((await handle(request({ ...body, aliases: ["Thayir sadam"] }), app)).status, 202);
+    assert.deepEqual((await f.store.board(f.provider)).library.find(meal => meal.id === body.mealId)?.aliases, ["Thayir sadam"]);
+  } finally { await f.close(); }
+});
