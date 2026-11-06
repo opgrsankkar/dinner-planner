@@ -6,6 +6,7 @@ import { AddMealDialog, type CellTarget } from "../AddMealDialog";
 import type { Board, Meal, Card, Slot } from "../types";
 import { defaultPlanPlacement } from "../plan-default";
 import { orderLibrary } from "../library-order";
+import { findMealByName, searchMeal } from "../meal-names";
 import { isPastSlot } from "../past-slot";
 import { requestId as newRequestId } from "../request-id";
 import { libraryDragPreview, sameLibraryDragPreview, type DragPreview } from "../drag-preview";
@@ -455,6 +456,7 @@ export function Planner() {
     setLibraryFeedback("");
     setLibraryError("");
     try {
+      const existing = board ? findMealByName(board.library, trimmed) : undefined;
       const added = (await post("/api/library", { name: trimmed })) as Meal | null;
       if (
         added &&
@@ -466,7 +468,9 @@ export function Planner() {
           ...previous.filter((id) => id !== added.id),
         ]);
       setSearch("");
-      setLibraryFeedback(`Added ${trimmed} to the meal library.`);
+      setLibraryFeedback(existing
+        ? `${trimmed} is already in the meal library${existing.name === trimmed ? "" : ` as ${existing.name}`}.`
+        : `Added ${trimmed} to the meal library.`);
       await refresh();
     } catch (error) {
       setLibraryError(error instanceof Error ? error.message : "Could not add meal. Please try again.");
@@ -479,7 +483,7 @@ export function Planner() {
   const weekRef = useRef(week);
   weekRef.current = week;
   const isCurrentWeek = week === monday();
-  const [target, setTarget] = useState<Meal | null>(null);
+  const [target, setTarget] = useState<Pick<Meal, "id" | "name"> | null>(null);
   const [day, setDay] = useState(week);
   const [slotId, setSlotId] = useState("");
   const [planDefaultAvailable, setPlanDefaultAvailable] = useState(true);
@@ -616,7 +620,7 @@ export function Planner() {
     if (!response.ok) throw new ApiError(result.error, response.status);
     return result;
   }
-  async function place(meal: Meal, date: string, slot: Slot) {
+  async function place(meal: Pick<Meal, "id" | "name">, date: string, slot: Slot) {
     const requestId = newRequestId();
     const card: Card = {
       id: `local:${requestId}`,
@@ -782,7 +786,7 @@ export function Planner() {
   navigateRef.current = navigate;
   async function copyCard(card: Card, date: string, slot: Slot) {
     try {
-      const meal = boardRef.current?.library.find((meal) => meal.name.toLowerCase() === card.name.toLowerCase())
+      const meal = findMealByName(boardRef.current?.library ?? [], card.name)
         ?? await createLibraryMeal(card.name);
       await place(meal, date, slot);
     } catch (error) {
@@ -1301,10 +1305,11 @@ export function Planner() {
             </div>
             <div className="library-list">
               {orderLibrary(board.library, recentMeals)
-                .filter((meal) =>
-                  meal.name.toLowerCase().includes(search.trim().toLowerCase()),
-                )
-                .map((meal) => (
+                .flatMap((meal) => {
+                  const result = searchMeal(meal, search);
+                  return result.match ? [{ meal, alias: result.alias }] : [];
+                })
+                .map(({ meal, alias }) => (
                   <button
                     className="library-chip"
                     type="button"
@@ -1335,7 +1340,10 @@ export function Planner() {
                     }}
                   >
                     <span className="drag-grip" aria-hidden="true">⠿</span>
-                    <span className="library-chip-name">{meal.name}</span>
+                    <span className="library-chip-name">
+                      {meal.name}
+                      {alias && <small className="meal-alias-match">{alias}</small>}
+                    </span>
                   </button>
                 ))}
             </div>

@@ -2,6 +2,7 @@ import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 
 export type LibraryRow = { id: string; name: string };
+export type LibraryAliasRow = { mealId: string; name: string };
 export type SlotRow = { id: string; name: string; time: string };
 export type LocalMealRow = { id: string; body: string };
 export type LocalReceiptRow = { id: string; body: string };
@@ -22,6 +23,9 @@ export class Persistence {
       this.connection.exec("BEGIN IMMEDIATE");
       try {
         this.connection.exec('CREATE TABLE IF NOT EXISTS "library" ("id" CHARACTER NOT NULL PRIMARY KEY, "name" TEXT NOT NULL)');
+        // Alternate meal names. A separate table leaves the original library rows
+        // untouched, so an older build still reads this database.
+        this.connection.exec('CREATE TABLE IF NOT EXISTS "library_alias" ("mealId" CHARACTER NOT NULL REFERENCES "library" ("id") ON DELETE CASCADE, "name" TEXT NOT NULL, "position" INTEGER NOT NULL, PRIMARY KEY ("mealId", "position"))');
         this.connection.exec('CREATE TABLE IF NOT EXISTS "slot" ("id" CHARACTER NOT NULL PRIMARY KEY, "name" TEXT NOT NULL, "time" TEXT NOT NULL)');
         this.connection.exec('CREATE TABLE IF NOT EXISTS "local_meal" ("id" CHARACTER NOT NULL PRIMARY KEY, "body" TEXT NOT NULL)');
         this.connection.exec('CREATE TABLE IF NOT EXISTS "local_receipt" ("id" CHARACTER NOT NULL PRIMARY KEY, "body" TEXT NOT NULL)');
@@ -57,6 +61,11 @@ export class Persistence {
     if (!columns.length) return;
     this.prepare('UPDATE "library" SET ' + columns.map(column => '"' + column + '" = ?').join(', ') + ' WHERE id = ?')
       .run(...columns.map(column => patch[column as keyof typeof patch]!), id);
+  }
+  libraryAliasAll(): LibraryAliasRow[] { return this.prepare('SELECT "mealId", "name" FROM "library_alias" ORDER BY "mealId", "position"').all().map(row => ({ ...row })) as LibraryAliasRow[]; }
+  libraryAliasReplace(mealId: string, names: string[]) {
+    this.prepare('DELETE FROM "library_alias" WHERE "mealId" = ?').run(mealId);
+    names.forEach((name, position) => this.prepare('INSERT INTO "library_alias" ("mealId", "name", "position") VALUES (?, ?, ?)').run(mealId, name, position));
   }
   slotAll(): SlotRow[] { return this.prepare('SELECT "id", "name", "time" FROM "slot"').all().map(row => ({ ...row })) as SlotRow[]; }
   slotGet(id: string): SlotRow | undefined { const row = this.prepare('SELECT "id", "name", "time" FROM "slot" WHERE id = ?').get(id); return row ? { ...row } as SlotRow : undefined; }

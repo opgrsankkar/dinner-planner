@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { orderLibrary } from "../src/library-order";
 import type { Meal } from "../src/types";
 
-const meal = (id: string): Meal => ({ id, name: id });
+const meal = (id: string): Meal => ({ id, name: id, aliases: [] });
 const ids = (meals: Meal[]) => meals.map((item) => item.id);
 
 test("newly created meal floats to the top without disturbing the rest", () => {

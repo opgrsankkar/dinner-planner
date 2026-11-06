@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import type { Meal, Slot } from "./types";
+import { findMealByName, searchMeal } from "./meal-names";
 
 export type CellTarget = { date: string; label: string; slot: Slot; past: boolean };
 
@@ -58,8 +59,11 @@ export function AddMealDialog({
     };
   }, [target]);
   const query = search.trim();
-  const matches = meals.filter((meal) => meal.name.toLowerCase().includes(query.toLowerCase()));
-  const canCreate = !!query && !meals.some((meal) => meal.name.trim().toLowerCase() === query.toLowerCase());
+  const matches = meals.flatMap((meal) => {
+    const result = searchMeal(meal, query);
+    return result.match ? [{ meal, alias: result.alias }] : [];
+  });
+  const canCreate = !!query && !findMealByName(meals, query);
   function pick(meal: Meal) {
     if (!target) return;
     dialog.current?.close();
@@ -69,7 +73,9 @@ export function AddMealDialog({
     event.preventDefault();
     if (!target || creating) return;
     if (!canCreate) {
-      if (matches.length === 1) pick(matches[0]);
+      const exact = findMealByName(meals, query);
+      if (exact) pick(exact);
+      else if (matches.length === 1) pick(matches[0].meal);
       return;
     }
     setCreating(true);
@@ -146,10 +152,11 @@ export function AddMealDialog({
         {error && <p className="add-meal-error" role="alert">{error}</p>}
         {matches.length > 0 || canCreate ? (
           <ul className="add-meal-options" aria-label="Meal library">
-            {matches.map((meal) => (
+            {matches.map(({ meal, alias }) => (
               <li key={meal.id}>
                 <button type="button" disabled={creating} onClick={() => pick(meal)}>
                   {meal.name}
+                  {alias && <small className="meal-alias-match">{alias}</small>}
                 </button>
               </li>
             ))}

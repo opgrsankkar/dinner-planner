@@ -1,5 +1,6 @@
-export type Meal = { id: string; name: string };
-export type Slot = Meal & { time: string };
+// `aliases` are alternate names; search finds a meal by any of them.
+export type Meal = { id: string; name: string; aliases: string[] };
+export type Slot = { id: string; name: string; time: string };
 export type Placement = {
   mealId: string;
   name: string;
