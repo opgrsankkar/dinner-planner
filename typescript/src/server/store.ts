@@ -445,10 +445,10 @@ export class Store {
     );
   }
   // Prep reminders due in [from, to) for planned meals from two weeks back on.
-  async prep(todoist: Todoist, from: number, to: number) {
+  async prep(todoist: Todoist, from: number, to: number, includeOverdue = false) {
     const board = await this.board(todoist);
     const recipes = new Map(this.db.recipeAll().map((row) => [row.mealId, storedRecipe(row)] as const));
-    return prepReminders(board.cards, board.slots, board.library, recipes, from, to);
+    return prepReminders(board.cards, board.slots, board.library, recipes, from, to, includeOverdue);
   }
   async shuffle() {
     return this.write(async () => {

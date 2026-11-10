@@ -49,3 +49,8 @@
 
 @media (max-width: 700px) { .folio-library .folio-library-rename input { flex-basis: 100%; } .folio-library .folio-library-rename button { flex: 1; } .folio-library .folio-library-tools { gap: 10px; } .folio-library .folio-library-tools input { font-size: 16px; } .folio-library .folio-library-add { font-size: 13px; } .folio-library .folio-library-name { font-size: 21px; } }
 @media (prefers-reduced-motion: reduce) { .folio-library .folio-library-spinner { animation: none !important; } .folio-library .folio-library-surface { transition: none !important; } }
+.folio-library .folio-library-recipe { position: relative; z-index: 1; flex-shrink: 0; display: grid; place-items: center; width: 44px; height: 44px; margin-left: 8px; border-radius: 6px; color: inherit; opacity: .35; }
+.folio-library .folio-library-recipe.has-recipe { opacity: 1; }
+.folio-library .folio-library-recipe .ui-icon { width: 21px; height: 21px; }
+.folio-library .folio-library-recipe:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; opacity: 1; }
+@media (hover: hover) and (pointer: fine) { .folio-library .folio-library-recipe:hover { opacity: 1; background: color-mix(in srgb, currentColor 10%, transparent); } }

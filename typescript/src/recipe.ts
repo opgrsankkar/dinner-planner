@@ -153,10 +153,13 @@ export function parseRecipe(input: unknown): Recipe {
   return { servings, totalMinutes, notes, sourceUrl, ingredients, steps, prep };
 }
 
+// 0.25 → "15 s", 2.5 → "2 min 30 s", 90 → "1 h 30 min"
 export function formatMinutes(minutes: number) {
-  const hours = Math.floor(minutes / 60);
-  const rest = Math.round(minutes % 60);
-  return hours ? (rest ? `${hours} h ${rest} min` : `${hours} h`) : `${rest} min`;
+  const seconds = Math.round(minutes * 60);
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  return [h && `${h} h`, m && `${m} min`, s && `${s} s`].filter(Boolean).join(" ") || "0 min";
 }
 
 export function formatHoursBefore(hours: number) {

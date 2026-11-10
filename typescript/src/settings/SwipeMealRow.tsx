@@ -19,6 +19,8 @@ export function SwipeMealRow({ meal, hint, removing, remove, action }: {
   const row = useRef<HTMLDivElement>(null);
   const animation = useRef<Animation | null>(null);
   const gesture = useRef<{ id: number; x: number; y: number; direction: "horizontal" | "vertical" | null } | null>(null);
+  // A swipe that ends over the recipe link must not also follow it.
+  const swiped = useRef(false);
   const stopHint = () => { animation.current?.cancel(); animation.current = null; };
   useEffect(() => {
     const media = matchMedia("(pointer: coarse)");
@@ -74,7 +76,7 @@ export function SwipeMealRow({ meal, hint, removing, remove, action }: {
     <div className="folio-library-surface" style={{ transform: `translateX(${offset}px)` }}
       onPointerDown={event => {
         if (editing || removing || event.button !== 0 || event.pointerType !== "touch") return;
-        stopHint(); gesture.current = { id: event.pointerId, x: event.clientX, y: event.clientY, direction: null };
+        stopHint(); swiped.current = false; gesture.current = { id: event.pointerId, x: event.clientX, y: event.clientY, direction: null };
       }}
       onPointerMove={event => {
         const start = gesture.current;
@@ -82,7 +84,7 @@ export function SwipeMealRow({ meal, hint, removing, remove, action }: {
         const dx = event.clientX - start.x, dy = event.clientY - start.y;
         if (!start.direction && Math.max(Math.abs(dx), Math.abs(dy)) >= 10) {
           start.direction = Math.abs(dx) > Math.abs(dy) * 1.5 ? "horizontal" : "vertical";
-          if (start.direction === "horizontal") event.currentTarget.setPointerCapture(event.pointerId);
+          if (start.direction === "horizontal") { swiped.current = true; event.currentTarget.setPointerCapture(event.pointerId); }
         }
         if (start.direction === "horizontal") setOffset(Math.max(-48, Math.min(48, dx)));
       }}
@@ -109,6 +111,13 @@ export function SwipeMealRow({ meal, hint, removing, remove, action }: {
         {meal.name}
         {meal.aliases.length > 0 && <small className="folio-library-aliases">Also {meal.aliases.join(" · ")}</small>}
       </span>}
+      {!editing && <a className={`folio-library-recipe${meal.hasRecipe ? " has-recipe" : ""}`}
+        href={meal.hasRecipe ? `/recipes/${meal.id}` : `/recipes/${meal.id}/edit`}
+        aria-label={meal.hasRecipe ? `Recipe for ${meal.name}` : `Add a recipe for ${meal.name}`}
+        title={meal.hasRecipe ? "Recipe" : "Add recipe"}
+        onClick={event => { if (swiped.current || offset !== 0) { event.preventDefault(); swiped.current = false; setOffset(0); } }}>
+        <svg className="ui-icon" aria-hidden="true"><use href="/static/lucide-icons.svg#book-open" /></svg>
+      </a>}
     </div>
     <button type="button" className="folio-library-edit folio-library-swipe-action"
       aria-label={`Edit ${meal.name}`} disabled={saving || removing}

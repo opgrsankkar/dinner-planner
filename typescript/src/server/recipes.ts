@@ -83,11 +83,15 @@ export type PrepReminder = {
   slotName: string;
   slotTime: string;
   mealAt: string;
+  // Due before `from` while the meal itself is still ahead (only with includeOverdue).
+  overdue: boolean;
 };
 
 // Prep items due in [from, to): every planned card that resolves to a meal
-// with a recipe contributes one reminder per prep item. Cards being deleted,
-// and cards without a valid date and time, are skipped.
+// with a recipe contributes one reminder per prep item. With includeOverdue,
+// items that fell due before `from` for meals starting after `from` are
+// included too, marked overdue. Cards being deleted, and cards without a valid
+// date and time, are skipped.
 export function prepReminders(
   cards: readonly Card[],
   slots: readonly Slot[],
@@ -95,6 +99,7 @@ export function prepReminders(
   recipes: ReadonlyMap<string, Recipe>,
   from: number,
   to: number,
+  includeOverdue = false,
 ): PrepReminder[] {
   const reminders: (PrepReminder & { at: number; mealMs: number })[] = [];
   for (const card of cards) {
@@ -108,7 +113,8 @@ export function prepReminders(
     for (const item of recipe.prep) {
       // Whole minutes, so 0.5 h is exactly 30 minutes before.
       const at = mealMs - Math.round(item.hoursBefore * 60) * 60000;
-      if (at < from || at >= to) continue;
+      const overdue = at < from && includeOverdue && mealMs > from;
+      if ((at < from && !overdue) || at >= to) continue;
       const due = kolkataIso(at);
       reminders.push({
         at,
@@ -126,6 +132,7 @@ export function prepReminders(
         slotName: slot?.name ?? "",
         slotTime: card.time,
         mealAt: kolkataIso(mealMs),
+        overdue,
       });
     }
   }

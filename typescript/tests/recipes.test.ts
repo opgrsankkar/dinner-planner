@@ -10,7 +10,7 @@ import { Store, Worker } from "../src/server/store";
 import { LocalPlan } from "../src/server/local-plan";
 import { Persistence } from "../src/server/persistence";
 import { handle, type App } from "../src/server/app";
-import { parseRecipe, RecipeInputError, type Recipe } from "../src/recipe";
+import { formatHoursBefore, formatMinutes, parseRecipe, RecipeInputError, type Recipe } from "../src/recipe";
 import { kolkataIso, parseInstant, prepRange, prepReminders, resolveCardMeal } from "../src/server/recipes";
 import type { Card, Meal, Slot } from "../src/types";
 
@@ -92,6 +92,11 @@ test("parseRecipe reports every problem with its field path", () => {
   assert.ok(issues({ steps: Array(61).fill("x") }).includes("steps may have at most 60 entries"));
 });
 
+test("durations read naturally", () => {
+  assert.deepEqual([0.25, 2, 2.5, 60, 90, 1440].map(formatMinutes), ["15 s", "2 min", "2 min 30 s", "1 h", "1 h 30 min", "24 h"]);
+  assert.deepEqual([0.5, 8, 12.5, 24, 48].map(formatHoursBefore), ["30 min before", "8 h before", "12.5 h before", "1 day before", "2 days before"]);
+});
+
 const library: Meal[] = [
   { id: "a", name: "தோசை", aliases: ["Dosa", "Plain dosa"] },
   { id: "b", name: "Masala dosa", aliases: [] },
@@ -133,6 +138,7 @@ test("prep reminders fall back across midnight onto the previous day in Asia/Kol
     dueAt: "2026-11-11T20:00:00+05:30", dueDate: "2026-11-11", dueTime: "20:00", text: undefined,
     hoursBefore: 12, mealName: "Dosa", libraryMealId: "a", cardId: "k1", date: "2026-11-12",
     slotId: "s-breakfast", slotName: "Breakfast", slotTime: "08:00", mealAt: "2026-11-12T08:00:00+05:30",
+    overdue: false,
   });
   // A 8.5 h prep before a 08:00 meal is due at 23:30 the evening before; the
   // timezone (not the host clock) decides the date.
@@ -158,6 +164,26 @@ test("prep reminders honour the [from, to) window and skip deleted, unmatched or
     ["k1", "12:00"],
     ["k4", "13:30"],
   ]);
+});
+
+test("overdue prep is included on request while its meal is still ahead", () => {
+  const recipes = new Map<string, Recipe>([["a", dosa]]);
+  const cards = [card("k1", "Dosa", "2026-11-12", "08:00"), card("k2", "Dosa", "2026-11-11", "08:00")];
+  // 22:35 the evening before k2: its 20:00 ferment was missed; k1's soak (12:00 on the 11th) is ahead.
+  const now = at("2026-11-10T22:35:00+05:30");
+  const to = at("2026-11-12T00:00:00+05:30");
+  assert.deepEqual(prepReminders(cards, slots, library, recipes, now, to).map((item) => [item.cardId, item.dueAt]), [
+    ["k1", "2026-11-11T12:00:00+05:30"],
+    ["k1", "2026-11-11T20:00:00+05:30"],
+  ]);
+  assert.deepEqual(prepReminders(cards, slots, library, recipes, now, to, true).map((item) => [item.cardId, item.dueAt, item.overdue]), [
+    ["k2", "2026-11-10T12:00:00+05:30", true],
+    ["k2", "2026-11-10T20:00:00+05:30", true],
+    ["k1", "2026-11-11T12:00:00+05:30", false],
+    ["k1", "2026-11-11T20:00:00+05:30", false],
+  ]);
+  // Once the meal has started nothing is overdue any more.
+  assert.equal(prepReminders(cards, slots, library, recipes, at("2026-11-11T08:00:00+05:30"), to, true).filter((item) => item.cardId === "k2").length, 0);
 });
 
 test("prep range defaults to now until the end of tomorrow and validates bounds", () => {

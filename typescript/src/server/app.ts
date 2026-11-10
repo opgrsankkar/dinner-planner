@@ -160,7 +160,12 @@ export async function handle(
       return json({
         from: kolkataIso(range.from),
         to: kolkataIso(range.to),
-        reminders: await store.prep(todoist, range.from, range.to),
+        reminders: await store.prep(
+          todoist,
+          range.from,
+          range.to,
+          url.searchParams.get("overdue") === "1",
+        ),
       });
     }
     if (url.pathname === "/api/board" && request.method === "GET") {
