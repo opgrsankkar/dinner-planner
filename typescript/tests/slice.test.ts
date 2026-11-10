@@ -804,7 +804,7 @@ test("alternate meal names save, stay unique, find the meal and go with it", asy
     assert.deepEqual((await f.store.addLibrary("THAYIR SADAM")).id, meal.id);
     library = (await f.store.board(f.provider)).library;
     assert.equal(library.length, 3);
-    assert.deepEqual(library.find(item => item.id === meal.id), { id: meal.id, name: "Curd rice", aliases: ["Thayir sadam", "Mosaru anna"] });
+    assert.deepEqual(library.find(item => item.id === meal.id), { id: meal.id, name: "Curd rice", aliases: ["Thayir sadam", "Mosaru anna"], hasRecipe: false });
     await assert.rejects(f.store.renameLibrary(other.id, other.name, ["mosaru anna"]), /already a name for Curd rice/);
     await assert.rejects(f.store.renameLibrary(other.id, "Thayir sadam"), /already a name for Curd rice/);
     await assert.rejects(f.store.renameLibrary(other.id, other.name, ["Curd rice"]), /already a name for Curd rice/);

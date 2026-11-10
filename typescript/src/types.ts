@@ -1,5 +1,5 @@
 // `aliases` are alternate names; search finds a meal by any of them.
-export type Meal = { id: string; name: string; aliases: string[] };
+export type Meal = { id: string; name: string; aliases: string[]; hasRecipe?: boolean };
 export type Slot = { id: string; name: string; time: string };
 export type Placement = {
   mealId: string;
@@ -22,6 +22,9 @@ export type RemoteMeal = {
   completed?: boolean;
   description?: string;
   dueError?: string;
+  // Library meal the card was planned from (local mode, newer cards only).
+  // Use Card.libraryMealId, which falls back to the name, rather than this.
+  mealId?: string;
 };
 export type Card = RemoteMeal & {
   state: "pending" | "saved";
@@ -29,6 +32,9 @@ export type Card = RemoteMeal & {
   confirmedAt: number;
   deleting?: boolean;
   slotId?: string;
+  // The library meal this card resolves to (see resolveCardMeal), or null.
+  libraryMealId?: string | null;
+  hasRecipe?: boolean;
 };
 export type Board = {
   library: Meal[];

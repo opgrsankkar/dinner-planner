@@ -5,6 +5,8 @@ export const Route = createFileRoute("/api/$")({
     handlers: {
       GET: async ({ request }) => handle(request, await app()),
       POST: async ({ request }) => handle(request, await app()),
+      PUT: async ({ request }) => handle(request, await app()),
+      DELETE: async ({ request }) => handle(request, await app()),
     },
   },
 });
