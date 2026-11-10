@@ -15,6 +15,12 @@ import type {
 import type { Todoist } from "./todoist";
 import { completionRequestId, reopenRequestId } from "./todoist";
 import { TodoistError } from "./todoist-api";
+import { parseRecipe, type Recipe, type StoredRecipe } from "../recipe";
+import { prepReminders, RequestError, resolveCardMeal } from "./recipes";
+import type { RecipeRow } from "./persistence";
+function storedRecipe(row: RecipeRow): StoredRecipe {
+  return { ...(JSON.parse(row.body) as Recipe), updatedAt: row.updatedAt };
+}
 export const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 // Prefer an authoritative, task-scoped read; a cached active listing can lag
@@ -274,10 +280,16 @@ export class Store {
         });
       }
       const slots = this.db.slotAll();
-      for (const card of cards)
+      const library = this.libraryMeals();
+      const recipeIds = this.db.recipeIds();
+      for (const card of cards) {
         card.slotId =
           slots.find((slot) => slot.time === card.time)?.id ??
           settings.aliases[card.time];
+        const meal = resolveCardMeal(card, library);
+        card.libraryMealId = meal?.id ?? null;
+        card.hasRecipe = !!meal && recipeIds.has(meal.id);
+      }
       const sort = <T extends { id: string }>(items: T[], order: string[]) =>
         items.sort((a, b) => {
           const ai = order.indexOf(a.id),
@@ -289,7 +301,10 @@ export class Store {
         integrationError,
         projectId: project.id,
         receivedRequests: operations.map((row) => row.id),
-        library: sort(this.libraryMeals(), settings.libraryOrder),
+        library: sort(
+          library.map((meal) => ({ ...meal, hasRecipe: recipeIds.has(meal.id) })),
+          settings.libraryOrder,
+        ),
         slots: sortSlotsByTime(sort(slots, settings.slotOrder)),
         cards,
       };
@@ -363,6 +378,77 @@ export class Store {
     await this.write(() =>
       this.db.libraryDelete(mealId),
     );
+  }
+  // Library meals with whether each has a recipe, alphabetically; with a name,
+  // only the meal that name (or alternate name) resolves to.
+  recipeIndex(name?: string): Meal[] {
+    const ids = this.db.recipeIds();
+    const library = this.libraryMeals().map((meal) => ({ ...meal, hasRecipe: ids.has(meal.id) }));
+    if (name !== undefined) {
+      const meal = resolveCardMeal({ name }, library);
+      return meal ? [meal] : [];
+    }
+    return library.sort((a, b) => a.name.localeCompare(b.name));
+  }
+  recipe(mealId: string): { meal: Meal; recipe: StoredRecipe } {
+    if (!uuidPattern.test(mealId)) throw new RequestError("Invalid meal ID");
+    const meal = this.libraryMeals().find((entry) => entry.id === mealId);
+    if (!meal) throw new RequestError("Meal not found", 404);
+    const row = this.db.recipeGet(mealId);
+    if (!row) throw new RequestError("This meal has no recipe", 404);
+    return { meal: { ...meal, hasRecipe: true }, recipe: storedRecipe(row) };
+  }
+  // Creates or replaces a meal's whole recipe.
+  async saveRecipe(mealId: string, input: unknown) {
+    if (!uuidPattern.test(mealId)) throw new RequestError("Invalid meal ID");
+    const recipe = parseRecipe(input);
+    return this.write(() =>
+      this.db.transaction((tx) => {
+        const meal = this.libraryMeals(tx).find((entry) => entry.id === mealId);
+        if (!meal) throw new RequestError("Meal not found", 404);
+        const row = { mealId, body: JSON.stringify(recipe), updatedAt: new Date().toISOString() };
+        tx.recipePut(row);
+        return { meal: { ...meal, hasRecipe: true }, recipe: storedRecipe(row) };
+      }),
+    );
+  }
+  // For assistants adding "a recipe for X": finds the library meal by name or
+  // alternate name, creating it when missing, and saves its recipe. An existing
+  // recipe is replaced only when `replace` is true.
+  async saveRecipeByName(name: unknown, input: unknown, replace: boolean) {
+    if (typeof name !== "string") throw new RequestError("name is required");
+    const cleaned = cleanMealName(name);
+    const recipe = parseRecipe(input);
+    return this.write(() =>
+      this.db.transaction((tx) => {
+        let meal = findMealByName(this.libraryMeals(tx), cleaned);
+        if (meal && tx.recipeGet(meal.id) && !replace)
+          throw new RequestError(
+            `${meal.name} already has a recipe. Send "replace": true to overwrite it, or PUT /api/recipes/${meal.id}`,
+            409,
+          );
+        const created = !meal;
+        meal ??= { ...tx.libraryInsert({ id: randomUUID(), name: cleaned }), aliases: [] };
+        const row = { mealId: meal.id, body: JSON.stringify(recipe), updatedAt: new Date().toISOString() };
+        tx.recipePut(row);
+        return { created, meal: { ...meal, hasRecipe: true }, recipe: storedRecipe(row) };
+      }),
+    );
+  }
+  async deleteRecipe(mealId: string) {
+    if (!uuidPattern.test(mealId)) throw new RequestError("Invalid meal ID");
+    return this.write(() =>
+      this.db.transaction((tx) => {
+        if (!tx.libraryGet(mealId)) throw new RequestError("Meal not found", 404);
+        return { deleted: tx.recipeDelete(mealId) };
+      }),
+    );
+  }
+  // Prep reminders due in [from, to) for planned meals from two weeks back on.
+  async prep(todoist: Todoist, from: number, to: number, includeOverdue = false) {
+    const board = await this.board(todoist);
+    const recipes = new Map(this.db.recipeAll().map((row) => [row.mealId, storedRecipe(row)] as const));
+    return prepReminders(board.cards, board.slots, board.library, recipes, from, to, includeOverdue);
   }
   async shuffle() {
     return this.write(async () => {

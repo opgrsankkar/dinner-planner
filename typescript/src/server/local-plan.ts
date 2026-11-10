@@ -60,6 +60,8 @@ export class LocalPlan implements Todoist {
       const task: RemoteMeal = {
         id: randomUUID(), projectId, name: input.name, date: input.date,
         time: input.time, requestId,
+        // Lets the card keep its library meal (and recipe) if the meal is renamed.
+        ...(input.mealId ? { mealId: input.mealId } : {}),
       };
       tx.localMealInsert({ id: id(task.id), body: JSON.stringify(task) });
       tx.localReceiptInsert({ id: id(requestId), body: JSON.stringify(task) });

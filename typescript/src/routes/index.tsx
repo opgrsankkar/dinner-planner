@@ -10,6 +10,9 @@ import { findMealByName, searchMeal } from "../meal-names";
 import { isPastSlot } from "../past-slot";
 import { requestId as newRequestId } from "../request-id";
 import { libraryDragPreview, sameLibraryDragPreview, type DragPreview } from "../drag-preview";
+import { RecipePage } from "../recipes/RecipePage";
+import { RecipeEditor } from "../recipes/RecipeEditor";
+import { goBack } from "../recipes/recipe-draft";
 // A second press inside this window turns the next hold into a copy.
 const TAP_WINDOW_MS = 300;
 const PICKUP_HOLD_MS = 250;
@@ -132,7 +135,12 @@ function fitSlotRows() {
   );
 }
 export function Planner() {
-  const settingsPage = useLocation().pathname === "/settings";
+  const pathname = useLocation().pathname;
+  const settingsPage = pathname === "/settings";
+  // /recipes/<mealId> reads a recipe, /recipes/<mealId>/edit edits it.
+  const recipeMatch = pathname.match(/^\/recipes\/([^/]+)(\/edit)?\/?$/);
+  const recipePage = recipeMatch ? { mealId: recipeMatch[1]!, edit: !!recipeMatch[2] } : null;
+  const subPage = settingsPage || !!recipePage;
   const [copying, setCopying] = useState<Card | null>(null);
   const pendingTap = useRef<{ cardId: string; timer: ReturnType<typeof setTimeout> } | null>(null);
   const touchPress = useRef(false);
@@ -575,7 +583,7 @@ export function Planner() {
   useLayoutEffect(() => {
     fitSlotRows();
   });
-  const boardShown = !!board && !settingsPage;
+  const boardShown = !!board && !subPage;
   useEffect(() => {
     if (!boardShown) return;
     // Late font loads or text changes resize the top bar/day headers without a render.
@@ -827,6 +835,22 @@ export function Planner() {
     void refresh().catch((e) => setError(String(e.message)));
     return added;
   }
+  // The planned card's or library meal's recipe; a card that matches no
+  // library meal gets one by adding its name to the library.
+  const recipeTarget: { mealId: string | null; name: string; hasRecipe: boolean } | null =
+    copying ? null
+      : moving ? { mealId: moving.libraryMealId ?? null, name: moving.name, hasRecipe: !!moving.hasRecipe }
+      : target ? { mealId: target.id, name: target.name, hasRecipe: !!board?.library.find((meal) => meal.id === target.id)?.hasRecipe }
+      : null;
+  async function openRecipe(meal: { mealId: string | null; name: string; hasRecipe: boolean }) {
+    try {
+      const id = meal.mealId ?? (await createLibraryMeal(meal.name)).id;
+      location.href = meal.hasRecipe ? `/recipes/${id}` : `/recipes/${id}/edit`;
+    } catch (error) {
+      dialog.current?.close();
+      setError(error instanceof Error ? error.message : "Could not open the recipe");
+    }
+  }
   function requestDelete(card: Card) {
     setDeleteTarget(card);
     dialog.current?.close();
@@ -844,12 +868,17 @@ export function Planner() {
     );
   return (
     <>
-      <header className={`topbar${settingsPage ? " settings-topbar" : ""}`}>
-        {!settingsPage && <a className="brand" href="/">
+      <header className={`topbar${subPage ? " settings-topbar" : ""}`}>
+        {!subPage && <a className="brand" href="/">
           <span className="brand-mark">✦</span>
           <span>Meal Planner</span>
         </a>}
-        {settingsPage ? (
+        {recipePage ? (
+          <a className="this-week" href={recipePage.edit ? `/recipes/${recipePage.mealId}` : "/"}
+            onClick={(event) => { event.preventDefault(); goBack(recipePage.edit ? `/recipes/${recipePage.mealId}` : "/"); }}>
+            ← Back
+          </a>
+        ) : settingsPage ? (
           <a className="this-week" href="/">← Back to plan</a>
         ) : (
           <nav className="week-nav" aria-label="Week navigation">
@@ -872,7 +901,7 @@ export function Planner() {
             </button>
           </nav>
         )}
-        {!settingsPage && <div className="top-actions">
+        {!subPage && <div className="top-actions">
           {!isCurrentWeek && (
             <button className="this-week" onClick={() => setWeek(monday())}>
               This week
@@ -899,7 +928,11 @@ export function Planner() {
           </a>
         </div>}
       </header>
-      {settingsPage ? (
+      {recipePage?.edit ? (
+        <RecipeEditor key={recipePage.mealId} mealId={recipePage.mealId} library={board.library} refresh={refresh} />
+      ) : recipePage ? (
+        <RecipePage key={recipePage.mealId} mealId={recipePage.mealId} library={board.library} />
+      ) : settingsPage ? (
         <SettingsPage board={board} post={post} refresh={refresh} />
       ) : (
         <main className="app-layout">
@@ -1081,7 +1114,7 @@ export function Planner() {
                                   }
                                   aria-description={
                                     card.state === "saved"
-                                      ? "Tap for actions. Hold and drag to move. Tap, then hold and drag to copy."
+                                      ? `${card.hasRecipe ? "Has a recipe. " : ""}Tap for actions. Hold and drag to move. Tap, then hold and drag to copy.`
                                       : undefined
                                   }
                                   aria-haspopup={
@@ -1149,6 +1182,11 @@ export function Planner() {
                                 >
                                   <span className="meal-chip-name">
                                     {card.name}
+                                    {card.hasRecipe && (
+                                      <span className="meal-recipe-mark" aria-hidden="true" title="Has a recipe">
+                                        <Icon name="book-open" />
+                                      </span>
+                                    )}
                                     {card.completed ? " ✓" : ""}
                                   </span>
                                   {card.state === "pending" ? (
@@ -1449,6 +1487,11 @@ export function Planner() {
             ))}
           </select>
           <div className="dialog-actions">
+            {recipeTarget && (
+              <button type="button" className="secondary-button" onClick={() => void openRecipe(recipeTarget)}>
+                {recipeTarget.hasRecipe ? "Recipe" : "Add recipe"}
+              </button>
+            )}
             {moving && <button type="button" className="secondary-button" onClick={() => {
               setCopying(moving);
               setMoving(null);

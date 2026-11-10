@@ -7,6 +7,8 @@ import { Store, Worker } from "./store";
 import { FakeTodoist } from "./todoist";
 import { TodoistApi } from "./todoist-api";
 import { LocalPlan } from "./local-plan";
+import { RecipeInputError } from "../recipe";
+import { kolkataIso, prepRange, RequestError } from "./recipes";
 import type { Todoist } from "./todoist";
 export type App = {
   store: Store;
@@ -129,6 +131,43 @@ export async function handle(
     });
   }
   try {
+    // Recipe and prep endpoints. Their responses never include the calendar
+    // link or any other secret, so the wall display can read them freely.
+    const recipePath = url.pathname.match(/^\/api\/recipes\/([^/]+)$/);
+    if (url.pathname === "/api/recipes" && request.method === "GET") {
+      const name = url.searchParams.get("name");
+      return json({ meals: store.recipeIndex(name ?? undefined) });
+    }
+    if (url.pathname === "/api/recipes" && request.method === "POST") {
+      const body = await jsonBody(request);
+      if (body.replace !== undefined && typeof body.replace !== "boolean")
+        throw new RequestError("replace must be true or false");
+      const saved = await store.saveRecipeByName(body.name, body.recipe, body.replace === true);
+      return json(saved, saved.created ? 201 : 200);
+    }
+    if (recipePath && request.method === "GET")
+      return json(store.recipe(recipePath[1]));
+    if (recipePath && request.method === "PUT")
+      return json(await store.saveRecipe(recipePath[1], await jsonBody(request)));
+    if (recipePath && request.method === "DELETE")
+      return json(await store.deleteRecipe(recipePath[1]));
+    if (url.pathname === "/api/prep" && request.method === "GET") {
+      const range = prepRange(
+        Date.now(),
+        url.searchParams.get("from"),
+        url.searchParams.get("to"),
+      );
+      return json({
+        from: kolkataIso(range.from),
+        to: kolkataIso(range.to),
+        reminders: await store.prep(
+          todoist,
+          range.from,
+          range.to,
+          url.searchParams.get("overdue") === "1",
+        ),
+      });
+    }
     if (url.pathname === "/api/board" && request.method === "GET") {
       const week = url.searchParams.get("week") ?? undefined;
       if (
@@ -258,9 +297,33 @@ export async function handle(
     }
     return json({ error: "Unknown endpoint" }, 404);
   } catch (error) {
+    if (error instanceof RecipeInputError)
+      return json({ error: error.message, issues: error.issues }, 400);
+    if (error instanceof RequestError)
+      return json(
+        { error: error.message, ...(error.issues ? { issues: error.issues } : {}) },
+        error.status,
+      );
     return json(
       { error: error instanceof Error ? error.message : "Request failed" },
       400,
     );
   }
+}
+const maxBodyBytes = 256 * 1024;
+async function jsonBody(request: Request): Promise<Record<string, unknown>> {
+  const length = Number(request.headers.get("content-length") ?? 0);
+  if (length > maxBodyBytes) throw new RequestError("Request body is too large", 413);
+  const text = await request.text();
+  if (new TextEncoder().encode(text).length > maxBodyBytes)
+    throw new RequestError("Request body is too large", 413);
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw new RequestError("Request body must be JSON");
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body))
+    throw new RequestError("Request body must be a JSON object");
+  return body as Record<string, unknown>;
 }

@@ -8,6 +8,7 @@ export type LocalMealRow = { id: string; body: string };
 export type LocalReceiptRow = { id: string; body: string };
 export type OutboxRow = { id: string; payload: string; state: string; error: string; remoteId: string; attempted: string; nextAt: string; confirmedAt: string };
 export type SettingRow = { id: string; value: string };
+export type RecipeRow = { mealId: string; body: string; updatedAt: string };
 
 // SQL identifiers below are fixed application constants; values always use bindings.
 // Version 1 adopts the original text/CHARACTER tables without rewriting their rows.
@@ -26,6 +27,9 @@ export class Persistence {
         // Alternate meal names. A separate table leaves the original library rows
         // untouched, so an older build still reads this database.
         this.connection.exec('CREATE TABLE IF NOT EXISTS "library_alias" ("mealId" CHARACTER NOT NULL REFERENCES "library" ("id") ON DELETE CASCADE, "name" TEXT NOT NULL, "position" INTEGER NOT NULL, PRIMARY KEY ("mealId", "position"))');
+        // One optional recipe per library meal (JSON body). Like library_alias it
+        // is additive: older builds ignore it, and removing a meal removes it.
+        this.connection.exec('CREATE TABLE IF NOT EXISTS "recipe" ("mealId" CHARACTER NOT NULL PRIMARY KEY REFERENCES "library" ("id") ON DELETE CASCADE, "body" TEXT NOT NULL, "updatedAt" TEXT NOT NULL)');
         this.connection.exec('CREATE TABLE IF NOT EXISTS "slot" ("id" CHARACTER NOT NULL PRIMARY KEY, "name" TEXT NOT NULL, "time" TEXT NOT NULL)');
         this.connection.exec('CREATE TABLE IF NOT EXISTS "local_meal" ("id" CHARACTER NOT NULL PRIMARY KEY, "body" TEXT NOT NULL)');
         this.connection.exec('CREATE TABLE IF NOT EXISTS "local_receipt" ("id" CHARACTER NOT NULL PRIMARY KEY, "body" TEXT NOT NULL)');
@@ -67,6 +71,13 @@ export class Persistence {
     this.prepare('DELETE FROM "library_alias" WHERE "mealId" = ?').run(mealId);
     names.forEach((name, position) => this.prepare('INSERT INTO "library_alias" ("mealId", "name", "position") VALUES (?, ?, ?)').run(mealId, name, position));
   }
+  recipeAll(): RecipeRow[] { return this.prepare('SELECT "mealId", "body", "updatedAt" FROM "recipe"').all().map(row => ({ ...row })) as RecipeRow[]; }
+  recipeIds(): Set<string> { return new Set(this.prepare('SELECT "mealId" FROM "recipe"').all().map(row => String(row.mealId))); }
+  recipeGet(mealId: string): RecipeRow | undefined { const row = this.prepare('SELECT "mealId", "body", "updatedAt" FROM "recipe" WHERE "mealId" = ?').get(mealId); return row ? { ...row } as RecipeRow : undefined; }
+  recipePut(row: RecipeRow) {
+    this.prepare('INSERT INTO "recipe" ("mealId", "body", "updatedAt") VALUES (?, ?, ?) ON CONFLICT ("mealId") DO UPDATE SET "body" = excluded."body", "updatedAt" = excluded."updatedAt"').run(row.mealId, row.body, row.updatedAt);
+  }
+  recipeDelete(mealId: string): boolean { return Number(this.prepare('DELETE FROM "recipe" WHERE "mealId" = ?').run(mealId).changes) > 0; }
   slotAll(): SlotRow[] { return this.prepare('SELECT "id", "name", "time" FROM "slot"').all().map(row => ({ ...row })) as SlotRow[]; }
   slotGet(id: string): SlotRow | undefined { const row = this.prepare('SELECT "id", "name", "time" FROM "slot" WHERE id = ?').get(id); return row ? { ...row } as SlotRow : undefined; }
   slotInsert(input: Omit<SlotRow, "id"> & { id?: string }): SlotRow {
