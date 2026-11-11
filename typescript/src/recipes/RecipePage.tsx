@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Meal } from "../types";
-import { formatHoursBefore, formatMinutes, type StoredRecipe } from "../recipe";
+import { formatHoursBefore, formatMinutes, type StoredRecipe, type VariantSummary } from "../recipe";
 import { RecipeIcon } from "./RecipeIcon";
 import { recipeRequest, RecipeApiError, type RecipeResponse } from "./recipe-draft";
+import { AddVariantForm, canAddVariant, variantFromUrl, variantHref, VariantTabs } from "./RecipeVariants";
 import "./recipes.css";
 
 type Load =
   | { status: "loading" }
-  | { status: "ready"; meal: Meal; recipe: StoredRecipe }
+  | { status: "ready"; meal: Meal; variants: (VariantSummary & { recipe: StoredRecipe })[] }
   | { status: "none" }
   | { status: "error"; message: string };
 
@@ -21,15 +22,25 @@ function sourceLabel(url: string) {
 
 // A recipe to read at arm's length: ahead-of-time work, an ingredient
 // checklist (ticks stay on this device and are not saved), steps, notes, and
-// a step-by-step cook mode.
+// a step-by-step cook mode. A meal with several recipe variants shows them as
+// tabs, opening on the default (or the one the URL names); each variant keeps
+// its own ticks.
 export function RecipePage({ mealId, library }: { mealId: string; library: Meal[] }) {
   const [load, setLoad] = useState<Load>({ status: "loading" });
-  const [ticked, setTicked] = useState<ReadonlySet<number>>(new Set());
+  const [selectedId, setSelectedId] = useState<string | undefined>(variantFromUrl);
+  const [ticks, setTicks] = useState<ReadonlyMap<string, ReadonlySet<number>>>(new Map());
   const [cooking, setCooking] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState("");
   const libraryMeal = library.find((entry) => entry.id === mealId);
   const fetchRecipe = useCallback(() => {
-    recipeRequest<RecipeResponse>("GET", `/api/recipes/${mealId}`)
-      .then((result) => setLoad({ status: "ready", ...result }))
+    recipeRequest<RecipeResponse>("GET", `/api/recipes/${mealId}?all=1`)
+      .then((result) => setLoad({
+        status: "ready",
+        meal: result.meal,
+        variants: result.variants.map((variant) => ({ ...variant, recipe: variant.recipe! })),
+      }))
       .catch((error) => {
         if (error instanceof RecipeApiError && error.status === 404 && error.message === "This meal has no recipe") setLoad({ status: "none" });
         else setLoad({ status: "error", message: error instanceof Error ? error.message : "Could not load the recipe" });
@@ -42,12 +53,40 @@ export function RecipePage({ mealId, library }: { mealId: string; library: Meal[
     window.addEventListener("pageshow", shown);
     return () => window.removeEventListener("pageshow", shown);
   }, [fetchRecipe]);
-  const toggle = (index: number) =>
-    setTicked((current) => {
-      const next = new Set(current);
-      if (!next.delete(index)) next.add(index);
-      return next;
-    });
+  const variants = load.status === "ready" ? load.variants : [];
+  const selected = variants.find((entry) => entry.id === selectedId) ?? variants.find((entry) => entry.isDefault) ?? variants[0];
+  const ticked = (selected && ticks.get(selected.id)) || new Set<number>();
+  const setTicked = (next: ReadonlySet<number>) => {
+    if (selected) setTicks((current) => new Map(current).set(selected.id, next));
+  };
+  const toggle = (index: number) => {
+    const next = new Set(ticked);
+    if (!next.delete(index)) next.add(index);
+    setTicked(next);
+  };
+  function select(variant: VariantSummary) {
+    setSelectedId(variant.id);
+    setAdding(false);
+    setFeedback("");
+    // Keep the choice on reload and for the Edit link, without a navigation.
+    history.replaceState(history.state, "", variantHref(mealId, variant));
+  }
+  async function makeDefault(variant: VariantSummary) {
+    setBusy(true);
+    setFeedback("");
+    try {
+      await recipeRequest<RecipeResponse>("PATCH", `/api/recipes/${mealId}/variants/${variant.id}`, { isDefault: true });
+      setLoad((current) => current.status !== "ready" ? current : {
+        ...current,
+        variants: current.variants.map((entry) => ({ ...entry, isDefault: entry.id === variant.id })),
+      });
+      history.replaceState(history.state, "", `/recipes/${mealId}`);
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "Could not change the default");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   if (load.status === "loading")
     return <main className="recipe-shell"><p className="recipe-empty" role="status">Loading recipe…</p></main>;
@@ -61,7 +100,10 @@ export function RecipePage({ mealId, library }: { mealId: string; library: Meal[
         <a className="primary-button recipe-primary" href={`/recipes/${mealId}/edit`}>Add recipe</a>
       </main>
     );
-  const { meal, recipe } = load;
+  const { meal } = load;
+  const variant = selected!;
+  const recipe = variant.recipe;
+  const several = variants.length > 1;
   const facts = [
     recipe.servings && `Serves ${recipe.servings}`,
     recipe.totalMinutes && formatMinutes(recipe.totalMinutes),
@@ -83,12 +125,25 @@ export function RecipePage({ mealId, library }: { mealId: string; library: Meal[
           </p>
         )}
       </div>
+      <VariantTabs variants={variants} selectedId={variant.id} onSelect={select} />
       <div className="recipe-read-actions">
         {recipe.steps.length > 0 && (
           <button type="button" className="primary-button recipe-primary" onClick={() => setCooking(true)}>Cook</button>
         )}
-        <a className="secondary-button" href={`/recipes/${mealId}/edit`}>Edit</a>
+        <a className="secondary-button" href={variantHref(mealId, variant, true)}>Edit</a>
+        <span className="recipe-read-variant-actions">
+        {several && !variant.isDefault && (
+          <button type="button" className="recipe-text-button" disabled={busy} onClick={() => void makeDefault(variant)}>Make default</button>
+        )}
+        {canAddVariant(variants) && !adding && (
+          <button type="button" className="recipe-text-button recipe-add-variant" onClick={() => setAdding(true)}>
+            + {several ? "Variant" : "Add variant"}
+          </button>
+        )}
+        </span>
       </div>
+      {feedback && <p className="recipe-issue" role="alert">{feedback}</p>}
+      {adding && <AddVariantForm mealId={mealId} current={variant} variants={variants} onCancel={() => setAdding(false)} />}
 
       {recipe.prep.length > 0 && (
         <section className="recipe-section" aria-labelledby="recipe-ahead">
@@ -106,7 +161,7 @@ export function RecipePage({ mealId, library }: { mealId: string; library: Meal[
           <div className="recipe-section-heading">
             <h2 id="recipe-ingredients">Ingredients</h2>
             {ticked.size > 0 && (
-              <button type="button" className="text-link-button" onClick={() => setTicked(new Set())}>Clear ticks</button>
+              <button type="button" className="text-link-button" onClick={() => setTicked(new Set<number>())}>Clear ticks</button>
             )}
           </div>
           <IngredientChecklist recipe={recipe} ticked={ticked} toggle={toggle} />
@@ -139,7 +194,7 @@ export function RecipePage({ mealId, library }: { mealId: string; library: Meal[
         </section>
       )}
       {cooking && (
-        <CookMode name={meal.name} recipe={recipe} ticked={ticked} toggle={toggle} onClose={() => setCooking(false)} />
+        <CookMode name={several ? `${meal.name} · ${variant.label}` : meal.name} variant={several ? variant.label : ""} recipe={recipe} ticked={ticked} toggle={toggle} onClose={() => setCooking(false)} />
       )}
     </main>
   );
@@ -180,8 +235,10 @@ function clock(ms: number) {
 
 // One step at a time in large text. Tapping the step advances; timers keep
 // running across steps; the screen stays awake (Wake Lock API) while open.
-function CookMode({ name, recipe, ticked, toggle, onClose }: {
+function CookMode({ name, variant, recipe, ticked, toggle, onClose }: {
   name: string;
+  // The variant being cooked, shown beside the step count ("" for a single recipe).
+  variant: string;
   recipe: StoredRecipe;
   ticked: ReadonlySet<number>;
   toggle: (index: number) => void;
@@ -292,7 +349,10 @@ function CookMode({ name, recipe, ticked, toggle, onClose }: {
         if (event.key === "ArrowLeft") { event.preventDefault(); go(-1); }
       }}>
       <header className="cook-top">
-        <span className="cook-progress" aria-live="polite">Step {index + 1} of {steps.length}</span>
+        <span className="cook-progress">
+          <span aria-live="polite">Step {index + 1} of {steps.length}</span>
+          {variant && <span className="cook-variant">{variant}</span>}
+        </span>
         {recipe.ingredients.length > 0 && (
           <button type="button" className="cook-chip" aria-expanded={showIngredients} onClick={() => setShowIngredients((shown) => !shown)}>
             Ingredients

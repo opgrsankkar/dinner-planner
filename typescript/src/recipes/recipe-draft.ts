@@ -1,8 +1,14 @@
-import { parseRecipe, RecipeInputError, type Recipe, type StoredRecipe } from "../recipe";
+import { parseRecipe, RecipeInputError, type Recipe, type StoredRecipe, type VariantSummary } from "../recipe";
 import type { Meal } from "../types";
 import { requestId } from "../request-id";
 
-export type RecipeResponse = { meal: Meal; recipe: StoredRecipe };
+// As /api/recipes/<mealId> answers; with ?all=1 each variant carries its recipe.
+export type RecipeResponse = {
+  meal: Meal;
+  recipe: StoredRecipe;
+  variant: VariantSummary;
+  variants: (VariantSummary & { recipe?: StoredRecipe })[];
+};
 
 export class RecipeApiError extends Error {
   constructor(message: string, readonly status: number) {

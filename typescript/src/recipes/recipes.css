@@ -135,3 +135,23 @@
 /* Board and library hints that a meal has a recipe. */
 .meal-recipe-mark { display: inline-block; width: 12px; height: 12px; margin-left: 4px; vertical-align: -1px; opacity: .55; }
 .meal-recipe-mark .ui-icon { width: 12px; height: 12px; stroke-width: 2.2; }
+
+/* Recipe variants: tabs under the title when a meal has several versions. */
+.recipe-variant-tabs { display: flex; gap: 8px; margin: -6px 0 18px; overflow-x: auto; scrollbar-width: none; padding: 2px 4px 4px 0; }
+.recipe-variant-tabs::-webkit-scrollbar { display: none; }
+.recipe-variant-tab { flex: 0 0 auto; display: inline-flex; align-items: baseline; gap: 6px; min-height: 44px; padding: 10px 16px; border: 1px solid var(--ink); border-radius: 5px; background: transparent; color: var(--ink); font: 700 16px Arial, Helvetica, sans-serif; text-decoration: none; cursor: pointer; white-space: nowrap; }
+.recipe-variant-tab:is([aria-selected=true], [aria-current=page]) { background: var(--ink); color: var(--cream); box-shadow: 2px 2px 0 color-mix(in srgb, var(--ink) 35%, transparent); }
+.recipe-variant-default { font-size: 11px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; opacity: .7; }
+.recipe-read-actions { align-items: center; flex-wrap: wrap; }
+.recipe-read-actions .recipe-text-button { min-height: 44px; }
+.recipe-variant-form { display: grid; gap: 10px; max-width: 420px; margin: 14px 0 6px; padding: 14px 0; border-top: 1px dashed var(--line); border-bottom: 1px dashed var(--line); }
+.recipe-variant-form-title { margin: 0; font-weight: 700; }
+.recipe-variant-form label { display: grid; gap: 2px; font-size: 14px; font-weight: 700; }
+.recipe-variant-form input { width: 100%; min-width: 0; border: 0; border-bottom: 1px solid var(--line); padding: 10px 0; background: transparent; color: inherit; font: 400 17px Arial, Helvetica, sans-serif; }
+.recipe-variant-form input:focus { border-bottom-color: var(--ink); outline: none; }
+.recipe-variant-form .recipe-issue { margin: 0; }
+.recipe-variant-form-actions { display: flex; align-items: center; gap: 16px; }
+.recipe-variant-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 18px; margin: -8px 0 4px; }
+.cook-progress { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-width: 0; }
+.cook-variant { padding: 2px 8px; border: 1px solid var(--ink); border-radius: 4px; font: 700 15px Arial, Helvetica, sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.recipe-read-variant-actions { display: flex; flex-wrap: wrap; gap: 0 18px; margin-left: auto; }
