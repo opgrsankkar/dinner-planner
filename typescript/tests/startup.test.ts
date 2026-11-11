@@ -24,11 +24,11 @@ test("production startup refuses future schema before listening and leaves it un
   const directory = mkdtempSync(join(tmpdir(), "planner-startup-")), path = join(directory, "future.sqlite");
   try {
     const db = new DatabaseSync(path);
-    db.exec("PRAGMA user_version=2; CREATE TABLE sentinel(value TEXT); INSERT INTO sentinel VALUES('unchanged')");
+    db.exec("PRAGMA user_version=3; CREATE TABLE sentinel(value TEXT); INSERT INTO sentinel VALUES('unchanged')");
     db.close();
-    assert.match(startup(path), /Unsupported database version 2/);
+    assert.match(startup(path), /Unsupported database version 3/);
     const check = new DatabaseSync(path);
-    assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 2);
+    assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 3);
     assert.equal(check.prepare("SELECT value FROM sentinel").get()!.value, "unchanged");
     check.close();
   } finally { rmSync(directory, { recursive: true, force: true }); }

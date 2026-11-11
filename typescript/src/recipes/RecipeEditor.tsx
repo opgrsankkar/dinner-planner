@@ -1,19 +1,22 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Reorder, useDragControls, useReducedMotion } from "motion/react";
 import type { Meal } from "../types";
-import type { StoredRecipe } from "../recipe";
+import type { StoredRecipe, VariantSummary } from "../recipe";
 import { RecipeIcon } from "./RecipeIcon";
 import {
   draftFromRecipe, draftIssues, draftPayload, emptyIngredient, emptyPrep, emptyStep,
   recipeRequest, RecipeApiError, sameDraft, type RecipeDraft, type RecipeResponse,
 } from "./recipe-draft";
+import { AddVariantForm, canAddVariant, RenameVariantForm, variantFromUrl, variantHref, VariantTabs } from "./RecipeVariants";
 import "./recipes.css";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
-// Edits a library meal's whole recipe with the settings Save/Revert convention:
-// Save is enabled only by a real valid change, Revert restores the saved
-// snapshot locally.
+// Edits one recipe variant of a library meal (the default unless the URL
+// names another) with the settings Save/Revert convention: Save is enabled
+// only by a real valid change, Revert restores the saved snapshot locally.
+// Variants show as tabs; the selected one can be renamed, made the default,
+// copied into a new version or deleted.
 export function RecipeEditor({ mealId, library, refresh }: {
   mealId: string;
   library: Meal[];
@@ -22,6 +25,9 @@ export function RecipeEditor({ mealId, library, refresh }: {
   const meal = library.find((entry) => entry.id === mealId);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [exists, setExists] = useState(false);
+  const [variant, setVariant] = useState<VariantSummary | null>(null);
+  const [variants, setVariants] = useState<VariantSummary[]>([]);
+  const [tool, setTool] = useState<"add" | "rename" | null>(null);
   const [baseline, setBaseline] = useState<RecipeDraft>(() => draftFromRecipe(null));
   const [draft, setDraft] = useState<RecipeDraft>(baseline);
   const [state, setState] = useState<SaveState>("idle");
@@ -32,13 +38,16 @@ export function RecipeEditor({ mealId, library, refresh }: {
 
   useEffect(() => {
     let current = true;
-    recipeRequest<RecipeResponse>("GET", `/api/recipes/${mealId}`)
+    const wanted = variantFromUrl();
+    recipeRequest<RecipeResponse>("GET", `/api/recipes/${mealId}${wanted ? `?variant=${encodeURIComponent(wanted)}` : ""}`)
       .then((result) => {
         if (!current) return;
         const loaded = draftFromRecipe(result.recipe);
         setBaseline(loaded);
         setDraft(loaded);
         setExists(true);
+        setVariant(result.variant);
+        setVariants(result.variants);
         setStatus("ready");
       })
       .catch((error) => {
@@ -87,12 +96,15 @@ export function RecipeEditor({ mealId, library, refresh }: {
     setFeedback("");
     const started = performance.now();
     try {
-      const result = await recipeRequest<RecipeResponse>("PUT", `/api/recipes/${mealId}`, draftPayload(draft));
+      const result = await recipeRequest<RecipeResponse>(
+        "PUT", variant ? `/api/recipes/${mealId}/variants/${variant.id}` : `/api/recipes/${mealId}`, draftPayload(draft));
       await new Promise((resolve) => setTimeout(resolve, Math.max(0, 420 - (performance.now() - started))));
       const saved = draftFromRecipeKeepingKeys(result.recipe, draft);
       setBaseline(saved);
       setDraft(saved);
       setExists(true);
+      setVariant(result.variant);
+      setVariants(result.variants);
       setState("saved");
       clearTimeout(savedTimer.current);
       savedTimer.current = setTimeout(() => setState((current) => (current === "saved" ? "idle" : current)), 1000);
@@ -102,14 +114,32 @@ export function RecipeEditor({ mealId, library, refresh }: {
       setFeedback(error instanceof Error ? error.message : "Could not save the recipe");
     }
   }
+  const several = variants.length > 1;
   async function remove() {
-    if (!window.confirm(`Delete the recipe for “${meal?.name}”? The meal stays in the library.`)) return;
+    const question = several
+      ? `Delete the “${variant?.label}” variant of ${meal?.name}? The other variants stay.`
+      : `Delete the recipe for “${meal?.name}”? The meal stays in the library.`;
+    if (!window.confirm(question)) return;
     try {
-      await recipeRequest("DELETE", `/api/recipes/${mealId}`);
+      await recipeRequest("DELETE", variant ? `/api/recipes/${mealId}/variants/${variant.id}` : `/api/recipes/${mealId}`);
       leaving.current = true;
       location.href = `/recipes/${mealId}`;
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : "Could not delete the recipe");
+    }
+  }
+  function applyVariants(result: RecipeResponse) {
+    setVariant(result.variant);
+    setVariants(result.variants);
+    setTool(null);
+  }
+  async function makeDefault() {
+    if (!variant) return;
+    try {
+      applyVariants(await recipeRequest<RecipeResponse>("PATCH", `/api/recipes/${mealId}/variants/${variant.id}`, { isDefault: true }));
+      history.replaceState(history.state, "", `/recipes/${mealId}/edit`);
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "Could not change the default");
     }
   }
 
@@ -125,6 +155,31 @@ export function RecipeEditor({ mealId, library, refresh }: {
         <h1>{meal.name}</h1>
         {meal.aliases.length > 0 && <p className="recipe-aliases">{meal.aliases.join(" · ")}</p>}
       </div>
+      {variant && (
+        <>
+          <VariantTabs variants={variants} selectedId={variant.id} hrefFor={(entry) => variantHref(mealId, entry, true)} />
+          {tool === "add" ? (
+            <AddVariantForm mealId={mealId} current={variant} variants={variants} onCancel={() => setTool(null)} />
+          ) : tool === "rename" ? (
+            <RenameVariantForm mealId={mealId} variant={variant} variants={variants} onDone={applyVariants} onCancel={() => setTool(null)} />
+          ) : (
+            <div className="recipe-variant-tools">
+              {several && (
+                <button type="button" className="recipe-text-button" disabled={saving} onClick={() => setTool("rename")}>Rename variant</button>
+              )}
+              {several && !variant.isDefault && (
+                <button type="button" className="recipe-text-button" disabled={saving} onClick={() => void makeDefault()}>Make default</button>
+              )}
+              {canAddVariant(variants) && (
+                <button type="button" className="recipe-text-button recipe-add-variant" disabled={saving || dirty}
+                  title={dirty ? "Save or revert first" : undefined} onClick={() => setTool("add")}>
+                  + {several ? "Variant" : "Add variant"}
+                </button>
+              )}
+            </div>
+          )}
+        </>
+      )}
       <form onSubmit={(event) => { event.preventDefault(); void save(); }}>
         <div className="recipe-editor-actions">
           <button className="primary-button slot-save-button recipe-save" data-state={state}
@@ -140,7 +195,7 @@ export function RecipeEditor({ mealId, library, refresh }: {
             Revert
           </button>
           <span className="recipe-editor-spacer" />
-          {exists && !dirty && <a className="secondary-button recipe-view-link" href={`/recipes/${mealId}`}>View recipe</a>}
+          {exists && !dirty && <a className="secondary-button recipe-view-link" href={variantHref(mealId, variant ?? undefined)}>View recipe</a>}
         </div>
         <p className="recipe-issue" role={feedback ? "alert" : "status"}>
           {feedback || (dirty && issues[0]) || ""}
@@ -253,7 +308,7 @@ export function RecipeEditor({ mealId, library, refresh }: {
 
         {exists && (
           <button type="button" className="danger-button recipe-delete" disabled={saving} onClick={() => void remove()}>
-            Delete recipe
+            {several ? "Delete this variant" : "Delete recipe"}
           </button>
         )}
       </form>

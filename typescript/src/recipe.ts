@@ -167,3 +167,22 @@ export function formatHoursBefore(hours: number) {
   if (hours >= 24 && hours % 24 === 0) return hours === 24 ? "1 day before" : `${hours / 24} days before`;
   return `${Number(hours.toFixed(2))} h before`;
 }
+
+// Recipe variants: one meal can hold several complete recipes ("Non-fry",
+// "Fry"), one of them the default. A meal with a single recipe has one
+// variant, normally unlabeled, and shows no label anywhere.
+export type VariantSummary = { id: string; label: string; isDefault: boolean; updatedAt: string };
+export const maxVariants = 4;
+export const maxVariantLabelLength = 40;
+// The label used for a meal's existing unlabeled recipe when a second variant
+// is added without naming it.
+export const fallbackVariantLabel = "Original";
+
+// Labels are trimmed, NFC normalised and have runs of spaces collapsed.
+export function cleanVariantLabel(label: string) {
+  return label.normalize("NFC").trim().replace(/\s+/g, " ");
+}
+// Labels are unique within a meal, ignoring case.
+export function variantLabelKey(label: string) {
+  return cleanVariantLabel(label).toLocaleLowerCase("en");
+}
