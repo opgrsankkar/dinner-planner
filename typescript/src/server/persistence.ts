@@ -8,10 +8,22 @@ export type LocalMealRow = { id: string; body: string };
 export type LocalReceiptRow = { id: string; body: string };
 export type OutboxRow = { id: string; payload: string; state: string; error: string; remoteId: string; attempted: string; nextAt: string; confirmedAt: string };
 export type SettingRow = { id: string; value: string };
-export type RecipeRow = { mealId: string; body: string; updatedAt: string };
+// One recipe variant of a library meal. A meal with a recipe has one or more
+// variants ("Non-fry", "Fry"), exactly one of them the default. A meal with a
+// single recipe has one variant, usually with an empty label.
+export type RecipeRow = { id: string; mealId: string; label: string; isDefault: boolean; position: number; body: string; updatedAt: string };
+
+export const schemaVersion = 2;
+const recipeTable = '"recipe" ("id" CHARACTER NOT NULL PRIMARY KEY, "mealId" CHARACTER NOT NULL REFERENCES "library" ("id") ON DELETE CASCADE, "label" TEXT NOT NULL, "isDefault" INTEGER NOT NULL, "position" INTEGER NOT NULL, "body" TEXT NOT NULL, "updatedAt" TEXT NOT NULL)';
+const recipeColumns = '"id", "mealId", "label", "isDefault", "position", "body", "updatedAt"';
+function recipeRow(row: Record<string, unknown>): RecipeRow {
+  return { id: String(row.id), mealId: String(row.mealId), label: String(row.label), isDefault: Number(row.isDefault) === 1, position: Number(row.position), body: String(row.body), updatedAt: String(row.updatedAt) };
+}
 
 // SQL identifiers below are fixed application constants; values always use bindings.
 // Version 1 adopts the original text/CHARACTER tables without rewriting their rows.
+// Version 2 turns the one-recipe-per-meal "recipe" table into recipe variants;
+// each existing recipe becomes its meal's single, unlabeled default variant.
 export class Persistence {
   private readonly connection: DatabaseSync;
   private readonly statements = new Map<string, StatementSync>();
@@ -20,25 +32,40 @@ export class Persistence {
     try {
       this.connection.exec("PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON");
       const version = Number(this.connection.prepare("PRAGMA user_version").get()!.user_version);
-      if (version > 1) throw new Error(`Unsupported database version ${version}`);
+      if (version > schemaVersion) throw new Error(`Unsupported database version ${version}`);
       this.connection.exec("BEGIN IMMEDIATE");
       try {
         this.connection.exec('CREATE TABLE IF NOT EXISTS "library" ("id" CHARACTER NOT NULL PRIMARY KEY, "name" TEXT NOT NULL)');
         // Alternate meal names. A separate table leaves the original library rows
         // untouched, so an older build still reads this database.
         this.connection.exec('CREATE TABLE IF NOT EXISTS "library_alias" ("mealId" CHARACTER NOT NULL REFERENCES "library" ("id") ON DELETE CASCADE, "name" TEXT NOT NULL, "position" INTEGER NOT NULL, PRIMARY KEY ("mealId", "position"))');
-        // One optional recipe per library meal (JSON body). Like library_alias it
-        // is additive: older builds ignore it, and removing a meal removes it.
-        this.connection.exec('CREATE TABLE IF NOT EXISTS "recipe" ("mealId" CHARACTER NOT NULL PRIMARY KEY REFERENCES "library" ("id") ON DELETE CASCADE, "body" TEXT NOT NULL, "updatedAt" TEXT NOT NULL)');
+        this.migrateRecipes();
         this.connection.exec('CREATE TABLE IF NOT EXISTS "slot" ("id" CHARACTER NOT NULL PRIMARY KEY, "name" TEXT NOT NULL, "time" TEXT NOT NULL)');
         this.connection.exec('CREATE TABLE IF NOT EXISTS "local_meal" ("id" CHARACTER NOT NULL PRIMARY KEY, "body" TEXT NOT NULL)');
         this.connection.exec('CREATE TABLE IF NOT EXISTS "local_receipt" ("id" CHARACTER NOT NULL PRIMARY KEY, "body" TEXT NOT NULL)');
         this.connection.exec('CREATE TABLE IF NOT EXISTS "outbox" ("id" CHARACTER NOT NULL PRIMARY KEY, "payload" TEXT NOT NULL, "state" TEXT NOT NULL, "error" TEXT NOT NULL, "remoteId" TEXT NOT NULL, "attempted" TEXT NOT NULL, "nextAt" TEXT NOT NULL, "confirmedAt" TEXT NOT NULL)');
         this.connection.exec('CREATE TABLE IF NOT EXISTS "setting" ("id" CHARACTER NOT NULL PRIMARY KEY, "value" TEXT NOT NULL)');
         this.connection.exec('CREATE TABLE IF NOT EXISTS "session" ("id" CHARACTER NOT NULL PRIMARY KEY, "csrf" TEXT NOT NULL, "expiresAt" TEXT NOT NULL)');
-        this.connection.exec("PRAGMA user_version=1; COMMIT");
+        this.connection.exec(`PRAGMA user_version=${schemaVersion}; COMMIT`);
       } catch (error) { this.connection.exec("ROLLBACK"); throw error; }
     } catch (error) { this.connection.close(); throw error; }
+  }
+  // Recipes (JSON bodies) belong to library meals; removing a meal removes them.
+  // The first recipes build (schema 1) kept one row per meal keyed by mealId;
+  // that table is rebuilt in place, each row becoming the meal's default
+  // variant with its body and updatedAt unchanged. Safe to run again.
+  private migrateRecipes() {
+    const columns = this.connection.prepare('PRAGMA table_info("recipe")').all().map((row) => String(row.name));
+    if (columns.length && !columns.includes("id")) {
+      this.connection.exec('ALTER TABLE "recipe" RENAME TO "recipe_v1"');
+      this.connection.exec("CREATE TABLE " + recipeTable);
+      const insert = this.connection.prepare('INSERT INTO "recipe" (' + recipeColumns + ') VALUES (?, ?, \'\', 1, 0, ?, ?)');
+      for (const row of this.connection.prepare('SELECT "mealId", "body", "updatedAt" FROM "recipe_v1"').all())
+        insert.run(randomUUID(), String(row.mealId), String(row.body), String(row.updatedAt));
+      this.connection.exec('DROP TABLE "recipe_v1"');
+    } else this.connection.exec("CREATE TABLE IF NOT EXISTS " + recipeTable);
+    this.connection.exec('CREATE UNIQUE INDEX IF NOT EXISTS "recipe_default" ON "recipe" ("mealId") WHERE "isDefault" = 1');
+    this.connection.exec('CREATE INDEX IF NOT EXISTS "recipe_meal" ON "recipe" ("mealId", "position")');
   }
   private prepare(sql: string) {
     let statement = this.statements.get(sql);
@@ -71,13 +98,29 @@ export class Persistence {
     this.prepare('DELETE FROM "library_alias" WHERE "mealId" = ?').run(mealId);
     names.forEach((name, position) => this.prepare('INSERT INTO "library_alias" ("mealId", "name", "position") VALUES (?, ?, ?)').run(mealId, name, position));
   }
-  recipeAll(): RecipeRow[] { return this.prepare('SELECT "mealId", "body", "updatedAt" FROM "recipe"').all().map(row => ({ ...row })) as RecipeRow[]; }
-  recipeIds(): Set<string> { return new Set(this.prepare('SELECT "mealId" FROM "recipe"').all().map(row => String(row.mealId))); }
-  recipeGet(mealId: string): RecipeRow | undefined { const row = this.prepare('SELECT "mealId", "body", "updatedAt" FROM "recipe" WHERE "mealId" = ?').get(mealId); return row ? { ...row } as RecipeRow : undefined; }
-  recipePut(row: RecipeRow) {
-    this.prepare('INSERT INTO "recipe" ("mealId", "body", "updatedAt") VALUES (?, ?, ?) ON CONFLICT ("mealId") DO UPDATE SET "body" = excluded."body", "updatedAt" = excluded."updatedAt"').run(row.mealId, row.body, row.updatedAt);
+  // Variants of one meal in display order.
+  recipeVariants(mealId: string): RecipeRow[] { return this.prepare('SELECT ' + recipeColumns + ' FROM "recipe" WHERE "mealId" = ? ORDER BY "position", "rowid"').all(mealId).map(recipeRow); }
+  // Every meal's default variant (prep reminders use only these).
+  recipeDefaults(): RecipeRow[] { return this.prepare('SELECT ' + recipeColumns + ' FROM "recipe" WHERE "isDefault" = 1').all().map(recipeRow); }
+  // How many variants each meal with a recipe has.
+  recipeCounts(): Map<string, number> { return new Map(this.prepare('SELECT "mealId", count(*) AS "n" FROM "recipe" GROUP BY "mealId"').all().map((row) => [String(row.mealId), Number(row.n)] as const)); }
+  recipeInsert(row: RecipeRow) {
+    this.prepare('INSERT INTO "recipe" (' + recipeColumns + ') VALUES (?, ?, ?, ?, ?, ?, ?)').run(row.id, row.mealId, row.label, row.isDefault ? 1 : 0, row.position, row.body, row.updatedAt);
   }
-  recipeDelete(mealId: string): boolean { return Number(this.prepare('DELETE FROM "recipe" WHERE "mealId" = ?').run(mealId).changes) > 0; }
+  recipeUpdate(id: string, patch: Partial<Pick<RecipeRow, "label" | "body" | "updatedAt">>) {
+    const columns = (["label", "body", "updatedAt"] as const).filter((column) => patch[column] !== undefined);
+    if (!columns.length) return;
+    this.prepare('UPDATE "recipe" SET ' + columns.map((column) => '"' + column + '" = ?').join(', ') + ' WHERE "id" = ?')
+      .run(...columns.map((column) => patch[column]!), id);
+  }
+  // Makes one variant its meal's default (clearing the old one first, so the
+  // one-default index holds throughout).
+  recipeSetDefault(mealId: string, id: string) {
+    this.prepare('UPDATE "recipe" SET "isDefault" = 0 WHERE "mealId" = ? AND "isDefault" = 1').run(mealId);
+    this.prepare('UPDATE "recipe" SET "isDefault" = 1 WHERE "mealId" = ? AND "id" = ?').run(mealId, id);
+  }
+  recipeDeleteVariant(id: string): boolean { return Number(this.prepare('DELETE FROM "recipe" WHERE "id" = ?').run(id).changes) > 0; }
+  recipeDeleteMeal(mealId: string): number { return Number(this.prepare('DELETE FROM "recipe" WHERE "mealId" = ?').run(mealId).changes); }
   slotAll(): SlotRow[] { return this.prepare('SELECT "id", "name", "time" FROM "slot"').all().map(row => ({ ...row })) as SlotRow[]; }
   slotGet(id: string): SlotRow | undefined { const row = this.prepare('SELECT "id", "name", "time" FROM "slot" WHERE id = ?').get(id); return row ? { ...row } as SlotRow : undefined; }
   slotInsert(input: Omit<SlotRow, "id"> & { id?: string }): SlotRow {

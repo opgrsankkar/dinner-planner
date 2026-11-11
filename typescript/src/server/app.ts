@@ -134,6 +134,9 @@ export async function handle(
     // Recipe and prep endpoints. Their responses never include the calendar
     // link or any other secret, so the wall display can read them freely.
     const recipePath = url.pathname.match(/^\/api\/recipes\/([^/]+)$/);
+    const variantsPath = url.pathname.match(/^\/api\/recipes\/([^/]+)\/variants$/);
+    const variantPath = url.pathname.match(/^\/api\/recipes\/([^/]+)\/variants\/([^/]+)$/);
+    const all = url.searchParams.get("all") === "1";
     if (url.pathname === "/api/recipes" && request.method === "GET") {
       const name = url.searchParams.get("name");
       return json({ meals: store.recipeIndex(name ?? undefined) });
@@ -142,15 +145,28 @@ export async function handle(
       const body = await jsonBody(request);
       if (body.replace !== undefined && typeof body.replace !== "boolean")
         throw new RequestError("replace must be true or false");
-      const saved = await store.saveRecipeByName(body.name, body.recipe, body.replace === true);
+      const saved = await store.saveRecipeByName(body.name, body.recipe, body.replace === true, body.variant, body.existingLabel);
       return json(saved, saved.created ? 201 : 200);
     }
+    // /api/recipes/<mealId> acts on the meal's default variant unless
+    // ?variant=<id> names another; ?all=1 adds every variant's full recipe.
+    const variantQuery = url.searchParams.get("variant") ?? undefined;
     if (recipePath && request.method === "GET")
-      return json(store.recipe(recipePath[1]));
+      return json(store.recipe(recipePath[1], variantQuery, all));
     if (recipePath && request.method === "PUT")
-      return json(await store.saveRecipe(recipePath[1], await jsonBody(request)));
+      return json(await store.saveRecipe(recipePath[1], await jsonBody(request), variantQuery));
     if (recipePath && request.method === "DELETE")
-      return json(await store.deleteRecipe(recipePath[1]));
+      return json(await store.deleteRecipe(recipePath[1], all));
+    if (variantsPath && request.method === "POST")
+      return json(await store.addVariant(variantsPath[1], await jsonBody(request)), 201);
+    if (variantPath && request.method === "GET")
+      return json(store.recipe(variantPath[1], variantPath[2], all));
+    if (variantPath && request.method === "PUT")
+      return json(await store.saveRecipe(variantPath[1], await jsonBody(request), variantPath[2]));
+    if (variantPath && request.method === "PATCH")
+      return json(await store.updateVariant(variantPath[1], variantPath[2], await jsonBody(request)));
+    if (variantPath && request.method === "DELETE")
+      return json(await store.deleteVariant(variantPath[1], variantPath[2]));
     if (url.pathname === "/api/prep" && request.method === "GET") {
       const range = prepRange(
         Date.now(),

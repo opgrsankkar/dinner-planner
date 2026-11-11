@@ -1,5 +1,6 @@
 // `aliases` are alternate names; search finds a meal by any of them.
-export type Meal = { id: string; name: string; aliases: string[]; hasRecipe?: boolean };
+// `variantCount` is how many recipe variants the meal has (0 without a recipe).
+export type Meal = { id: string; name: string; aliases: string[]; hasRecipe?: boolean; variantCount?: number };
 export type Slot = { id: string; name: string; time: string };
 export type Placement = {
   mealId: string;
@@ -35,6 +36,7 @@ export type Card = RemoteMeal & {
   // The library meal this card resolves to (see resolveCardMeal), or null.
   libraryMealId?: string | null;
   hasRecipe?: boolean;
+  variantCount?: number;
 };
 export type Board = {
   library: Meal[];

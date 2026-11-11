@@ -8,9 +8,9 @@ import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { Store, Worker } from "../src/server/store";
 import { LocalPlan } from "../src/server/local-plan";
-import { Persistence } from "../src/server/persistence";
+import { Persistence, type RecipeRow } from "../src/server/persistence";
 import { handle, type App } from "../src/server/app";
-import { formatHoursBefore, formatMinutes, parseRecipe, RecipeInputError, type Recipe } from "../src/recipe";
+import { formatHoursBefore, formatMinutes, parseRecipe, RecipeInputError, type Recipe, type VariantSummary } from "../src/recipe";
 import { kolkataIso, parseInstant, prepRange, prepReminders, resolveCardMeal } from "../src/server/recipes";
 import type { Card, Meal, Slot } from "../src/types";
 
@@ -200,12 +200,8 @@ test("prep range defaults to now until the end of tomorrow and validates bounds"
   assert.throws(() => prepRange(now, "2026-11-01T00:00", "2026-11-20T00:00"), /at most 14 days/);
 });
 
-test("the recipe table is added in place to a database that predates it", () => {
-  const path = join(root, `${randomUUID()}.sqlite`);
-  const mealId = randomUUID();
-  const old = new DatabaseSync(path);
-  // The schema shipped with alternate names (PR #102), before recipes.
-  old.exec(`CREATE TABLE "library" ("id" CHARACTER NOT NULL PRIMARY KEY, "name" TEXT NOT NULL);
+// The schema shipped with alternate names (PR #102), before recipes.
+const preRecipesSchema = `CREATE TABLE "library" ("id" CHARACTER NOT NULL PRIMARY KEY, "name" TEXT NOT NULL);
     CREATE TABLE "library_alias" ("mealId" CHARACTER NOT NULL REFERENCES "library" ("id") ON DELETE CASCADE, "name" TEXT NOT NULL, "position" INTEGER NOT NULL, PRIMARY KEY ("mealId", "position"));
     CREATE TABLE "slot" ("id" CHARACTER NOT NULL PRIMARY KEY, "name" TEXT NOT NULL, "time" TEXT NOT NULL);
     CREATE TABLE "local_meal" ("id" CHARACTER NOT NULL PRIMARY KEY, "body" TEXT NOT NULL);
@@ -213,7 +209,17 @@ test("the recipe table is added in place to a database that predates it", () => 
     CREATE TABLE "outbox" ("id" CHARACTER NOT NULL PRIMARY KEY, "payload" TEXT NOT NULL, "state" TEXT NOT NULL, "error" TEXT NOT NULL, "remoteId" TEXT NOT NULL, "attempted" TEXT NOT NULL, "nextAt" TEXT NOT NULL, "confirmedAt" TEXT NOT NULL);
     CREATE TABLE "setting" ("id" CHARACTER NOT NULL PRIMARY KEY, "value" TEXT NOT NULL);
     CREATE TABLE "session" ("id" CHARACTER NOT NULL PRIMARY KEY, "csrf" TEXT NOT NULL, "expiresAt" TEXT NOT NULL);
-    PRAGMA user_version=1;`);
+    PRAGMA user_version=1;`;
+// …and the one-recipe-per-meal table that recipes shipped with (PR #103).
+const recipesV1Table = `CREATE TABLE "recipe" ("mealId" CHARACTER NOT NULL PRIMARY KEY REFERENCES "library" ("id") ON DELETE CASCADE, "body" TEXT NOT NULL, "updatedAt" TEXT NOT NULL);`;
+const variantRow = (mealId: string, body: Recipe, extra: Partial<RecipeRow> = {}): RecipeRow =>
+  ({ id: randomUUID(), mealId, label: "", isDefault: true, position: 0, body: JSON.stringify(body), updatedAt: "2026-11-10T00:00:00.000Z", ...extra });
+
+test("the recipe table is added to a database that predates recipes", () => {
+  const path = join(root, `${randomUUID()}.sqlite`);
+  const mealId = randomUUID();
+  const old = new DatabaseSync(path);
+  old.exec(preRecipesSchema);
   old.prepare("INSERT INTO library VALUES (?, ?)").run(mealId, "இட்லி");
   old.prepare("INSERT INTO library_alias VALUES (?, ?, 0)").run(mealId, "Idli");
   old.prepare("INSERT INTO local_meal VALUES (?, ?)").run(randomUUID(), JSON.stringify({ name: "Idli" }));
@@ -222,16 +228,56 @@ test("the recipe table is added in place to a database that predates it", () => 
   old.close();
 
   const db = new Persistence(path);
-  assert.equal(db.recipeAll().length, 0);
-  db.recipePut({ mealId, body: JSON.stringify(dosa), updatedAt: "2026-11-10T00:00:00.000Z" });
-  assert.throws(() => db.recipePut({ mealId: randomUUID(), body: "{}", updatedAt: "" }), /FOREIGN KEY/);
+  assert.equal(db.recipeCounts().size, 0);
+  db.recipeInsert(variantRow(mealId, dosa));
+  assert.throws(() => db.recipeInsert(variantRow(randomUUID(), dosa)), /FOREIGN KEY/);
   db.close();
-  // Reopening is a no-op; data, alias and version are untouched.
+  // Reopening is a no-op; data and alias are untouched.
   new Persistence(path).close();
   const check = new DatabaseSync(path);
   assert.deepEqual(tables.map((table) => check.prepare(`SELECT * FROM ${table}`).all()), before);
-  assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 1);
+  assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 2);
   assert.equal(check.prepare("SELECT count(*) AS n FROM recipe").get()!.n, 1);
+  check.close();
+});
+
+test("the one-recipe-per-meal table becomes default variants in place, once", () => {
+  const path = join(root, `${randomUUID()}.sqlite`);
+  const [idli, dosaId, bare] = [randomUUID(), randomUUID(), randomUUID()];
+  const old = new DatabaseSync(path);
+  old.exec(preRecipesSchema + recipesV1Table);
+  for (const [id, name] of [[idli, "இட்லி"], [dosaId, "தோசை"], [bare, "Upma"]]) old.prepare("INSERT INTO library VALUES (?, ?)").run(id, name);
+  old.prepare("INSERT INTO recipe VALUES (?, ?, ?)").run(idli, JSON.stringify({ ...dosa, notes: "இட்லி notes" }), "2026-11-09T01:02:03.004Z");
+  old.prepare("INSERT INTO recipe VALUES (?, ?, ?)").run(dosaId, JSON.stringify(dosa), "2026-11-10T05:06:07.008Z");
+  const before = old.prepare("SELECT * FROM library").all();
+  old.close();
+
+  const db = new Persistence(path);
+  const migrated = [idli, dosaId].map((id) => db.recipeVariants(id));
+  assert.deepEqual(migrated.map((rows) => rows.map(({ id: _id, ...row }) => row)), [
+    [{ mealId: idli, label: "", isDefault: true, position: 0, body: JSON.stringify({ ...dosa, notes: "இட்லி notes" }), updatedAt: "2026-11-09T01:02:03.004Z" }],
+    [{ mealId: dosaId, label: "", isDefault: true, position: 0, body: JSON.stringify(dosa), updatedAt: "2026-11-10T05:06:07.008Z" }],
+  ]);
+  assert.deepEqual([...db.recipeCounts()].sort(), [[dosaId, 1], [idli, 1]].sort());
+  assert.deepEqual(db.recipeVariants(bare), []);
+  // One default per meal is enforced by the database.
+  assert.throws(() => db.recipeInsert(variantRow(idli, dosa, { label: "Second", position: 1 })), /UNIQUE/);
+  db.recipeInsert(variantRow(idli, dosa, { label: "Second", isDefault: false, position: 1 }));
+  db.close();
+
+  // Running the migration again changes nothing (variant ids are kept).
+  const again = new Persistence(path);
+  assert.deepEqual(again.recipeVariants(dosaId), migrated[1]);
+  assert.equal(again.recipeVariants(idli).length, 2);
+  again.close();
+  const check = new DatabaseSync(path);
+  assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 2);
+  assert.deepEqual(check.prepare("SELECT * FROM library").all(), before);
+  assert.equal(check.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name = 'recipe_v1'").get()!.n, 0);
+  // Removing a meal still removes all of its variants.
+  check.exec("PRAGMA foreign_keys=ON");
+  check.prepare("DELETE FROM library WHERE id = ?").run(idli);
+  assert.equal(check.prepare("SELECT count(*) AS n FROM recipe WHERE mealId = ?").get(idli)!.n, 0);
   check.close();
 });
 
@@ -305,7 +351,7 @@ test("recipe API: save, read, board indicators, rename and removal", async () =>
     // Removing the meal removes its recipe; cards stay but lose the link.
     const removed = await f.call("/api/library/remove", "POST", { mealId: meal.id });
     assert.equal(removed.status, 202);
-    assert.equal(f.store.db.recipeAll().length, 0);
+    assert.equal(f.store.db.recipeCounts().size, 0);
     const after = await f.store.board(f.provider);
     assert.equal(after.cards.length, 2);
     assert.ok(after.cards.every((item) => item.libraryMealId === null && item.hasRecipe === false));
@@ -352,8 +398,9 @@ test("recipe API: create by name, conflicts, deletes and validation errors", asy
     }
     assert.equal((await handle(new Request("http://evil.test/api/recipes"), f.app)).status, 403);
 
-    assert.deepEqual((await f.call(`/api/recipes/${id}`, "DELETE")).json, { deleted: true });
-    assert.deepEqual((await f.call(`/api/recipes/${id}`, "DELETE")).json, { deleted: false });
+    // Old callers read `deleted`; the remaining variants are added alongside.
+    assert.deepEqual((await f.call(`/api/recipes/${id}`, "DELETE")).json, { deleted: true, variants: [] });
+    assert.deepEqual((await f.call(`/api/recipes/${id}`, "DELETE")).json, { deleted: false, variants: [] });
     assert.equal(f.store.db.libraryAll().length, 1, "deleting a recipe keeps the meal");
   } finally { await f.close(); }
 });
@@ -381,5 +428,164 @@ test("prep API lists reminders for planned meals without the calendar link", asy
     assert.deepEqual((await f.call("/api/prep?from=2030-10-01T00:00&to=2030-10-02T00:00")).json.reminders, []);
     assert.equal((await f.call("/api/prep?from=yesterday")).status, 400);
     assert.equal((await f.call("/api/prep")).status, 200);
+  } finally { await f.close(); }
+});
+
+const fry: Recipe = {
+  ...dosa,
+  notes: "Roast the masala first.",
+  ingredients: [...dosa.ingredients, { amount: "2", item: "red chillies" }],
+  steps: [{ text: "Roast the masala", timerMinutes: 4 }, ...dosa.steps],
+  prep: [],
+};
+
+test("recipe variants: add, read, labels, default, rename and delete", async () => {
+  const f = await fixture();
+  try {
+    const meal = await f.store.addLibrary("Tomato Sambar");
+    const single = await f.call(`/api/recipes/${meal.id}`, "PUT", dosa);
+    assert.equal(single.status, 200, single.text);
+    // A single recipe reads exactly as before, plus its one unlabeled variant.
+    const first = single.json.variant;
+    assert.deepEqual([first.label, first.isDefault], ["", true]);
+    assert.deepEqual(single.json.variants, [first]);
+    assert.deepEqual([single.json.meal.hasRecipe, single.json.meal.variantCount], [true, 1]);
+    assert.deepEqual({ ...single.json.recipe, updatedAt: undefined }, { ...dosa, updatedAt: undefined });
+
+    // A second variant labels the first one too.
+    const missing = await f.call(`/api/recipes/${meal.id}/variants`, "POST", { recipe: fry });
+    assert.deepEqual([missing.status, missing.json.error], [400, "label is required"]);
+    const added = await f.call(`/api/recipes/${meal.id}/variants`, "POST", { label: "  Fry ", existingLabel: "Non-fry", recipe: fry });
+    assert.equal(added.status, 201, added.text);
+    const fryId = added.json.variant.id as string;
+    assert.deepEqual(added.json.variants.map((v: VariantSummary) => [v.label, v.isDefault]), [["Non-fry", true], ["Fry", false]]);
+    assert.deepEqual(added.json.recipe.steps, fry.steps);
+
+    // The plain GET still returns the default recipe in the old shape.
+    const read = await f.call(`/api/recipes/${meal.id}`);
+    assert.deepEqual(Object.keys(read.json).sort(), ["meal", "recipe", "variant", "variants"]);
+    assert.deepEqual(read.json.recipe.steps, dosa.steps);
+    assert.deepEqual([read.json.variant.id, read.json.variant.label, read.json.meal.variantCount], [first.id, "Non-fry", 2]);
+    assert.ok(read.json.variants.every((v: object) => !("recipe" in v)));
+    // ?variant= and /variants/<id> read another; ?all=1 carries every recipe.
+    assert.deepEqual((await f.call(`/api/recipes/${meal.id}?variant=${fryId}`)).json.recipe.steps, fry.steps);
+    assert.deepEqual((await f.call(`/api/recipes/${meal.id}/variants/${fryId}`)).json.variant.label, "Fry");
+    const all = await f.call(`/api/recipes/${meal.id}?all=1`);
+    assert.deepEqual(all.json.variants.map((v: { recipe: Recipe }) => v.recipe.steps.length), [2, 3]);
+    assert.equal((await f.call(`/api/recipes/${meal.id}?variant=${randomUUID()}`)).status, 404);
+    assert.equal((await f.call(`/api/recipes/${meal.id}?variant=nope`)).json.error, "Invalid variant ID");
+
+    // Labels are unique within a meal, ignoring case and spacing.
+    for (const label of ["fry", "FRY", " non-FRY "]) {
+      const taken = await f.call(`/api/recipes/${meal.id}/variants`, "POST", { label, recipe: fry });
+      assert.equal(taken.status, 409, label);
+      assert.match(taken.json.error, /already has a variant called/);
+    }
+    assert.equal((await f.call(`/api/recipes/${meal.id}/variants/${fryId}`, "PATCH", { label: "non-fry" })).status, 409);
+    assert.equal((await f.call(`/api/recipes/${meal.id}/variants/${fryId}`, "PATCH", { label: "" })).status, 400);
+    assert.equal((await f.call(`/api/recipes/${meal.id}/variants`, "POST", { label: "x".repeat(41), recipe: fry })).status, 400);
+    assert.equal((await f.call(`/api/recipes/${meal.id}/variants`, "POST", { label: "x", recipe: fry, colour: "red" })).status, 400);
+    // Same label on a different meal is fine; a Tamil label works.
+    const other = await f.store.addLibrary("Rasam");
+    await f.call(`/api/recipes/${other.id}`, "PUT", dosa);
+    assert.equal((await f.call(`/api/recipes/${other.id}/variants`, "POST", { label: "Fry", recipe: fry })).status, 201);
+    const tamil = await f.call(`/api/recipes/${meal.id}/variants`, "POST", { label: "வறுத்தது", copyFrom: fryId });
+    assert.equal(tamil.status, 201, tamil.text);
+    assert.deepEqual(tamil.json.recipe.steps, fry.steps, "copyFrom copies the whole recipe");
+    const tamilId = tamil.json.variant.id as string;
+
+    // Rename and make default; the old one stops being default.
+    const renamed = await f.call(`/api/recipes/${meal.id}/variants/${fryId}`, "PATCH", { label: "Fried masala", isDefault: true });
+    assert.equal(renamed.status, 200, renamed.text);
+    assert.deepEqual(renamed.json.variants.map((v: VariantSummary) => [v.label, v.isDefault]), [["Non-fry", false], ["Fried masala", true], ["வறுத்தது", false]]);
+    assert.deepEqual((await f.call(`/api/recipes/${meal.id}`)).json.recipe.steps, fry.steps);
+    assert.equal((await f.call(`/api/recipes/${meal.id}/variants/${fryId}`, "PATCH", { isDefault: false })).status, 400);
+
+    // Old-style PUT replaces the default variant only, keeping its id and label.
+    const put = await f.call(`/api/recipes/${meal.id}`, "PUT", { ...fry, notes: "Edited" });
+    assert.deepEqual([put.json.variant.id, put.json.variant.label, put.json.recipe.notes], [fryId, "Fried masala", "Edited"]);
+    assert.equal((await f.call(`/api/recipes/${meal.id}?variant=${first.id}`)).json.recipe.notes, "");
+    assert.equal((await f.call(`/api/recipes/${meal.id}/variants/${tamilId}`, "PUT", { notes: "Only notes" })).json.recipe.notes, "Only notes");
+
+    // At most four variants.
+    assert.equal((await f.call(`/api/recipes/${meal.id}/variants`, "POST", { label: "Four", copyFrom: fryId })).status, 201);
+    assert.equal((await f.call(`/api/recipes/${meal.id}/variants`, "POST", { label: "Five", copyFrom: fryId })).status, 409);
+
+    // Board cards and library entries carry the count.
+    await f.plan(meal.id, "2030-10-02");
+    const board = await f.store.board(f.provider);
+    assert.deepEqual(board.cards.map((card) => [card.hasRecipe, card.variantCount]), [[true, 4]]);
+    assert.deepEqual(board.library.find((entry) => entry.id === meal.id)?.variantCount, 4);
+    assert.deepEqual((await f.call("/api/recipes?name=tomato sambar")).json.meals[0].variantCount, 4);
+
+    // Deleting the default promotes the first remaining variant.
+    const deleted = await f.call(`/api/recipes/${meal.id}/variants/${fryId}`, "DELETE");
+    assert.equal(deleted.status, 200);
+    assert.deepEqual(deleted.json.variants.map((v: VariantSummary) => [v.label, v.isDefault]), [["Non-fry", true], ["வறுத்தது", false], ["Four", false]]);
+    assert.equal((await f.call(`/api/recipes/${meal.id}/variants/${fryId}`, "DELETE")).json.deleted, false, "repeating is safe");
+    // Old-style DELETE removes the default variant only.
+    const oldDelete = await f.call(`/api/recipes/${meal.id}`, "DELETE");
+    assert.deepEqual(oldDelete.json.variants.map((v: VariantSummary) => [v.label, v.isDefault]), [["வறுத்தது", true], ["Four", false]]);
+    assert.equal((await f.call(`/api/recipes/${meal.id}/variants/${tamilId}`, "DELETE")).json.variants.length, 1);
+    // A lone variant may drop its label again; deleting the last leaves no recipe.
+    const lone = (await f.call(`/api/recipes/${meal.id}`)).json.variant;
+    assert.deepEqual([lone.label, lone.isDefault], ["Four", true]);
+    assert.equal((await f.call(`/api/recipes/${meal.id}/variants/${lone.id}`, "PATCH", { label: "" })).json.variant.label, "");
+    assert.deepEqual((await f.call(`/api/recipes/${meal.id}/variants/${lone.id}`, "DELETE")).json, { deleted: true, variants: [] });
+    assert.equal((await f.call(`/api/recipes/${meal.id}`)).json.error, "This meal has no recipe");
+    assert.equal((await f.store.board(f.provider)).cards[0]!.hasRecipe, false);
+    assert.equal(f.store.db.libraryAll().length, 2, "deleting variants keeps the meal");
+
+    // ?all=1 on DELETE removes every variant.
+    assert.deepEqual((await f.call(`/api/recipes/${other.id}?all=1`, "DELETE")).json, { deleted: true, variants: [] });
+
+    // Writes need the planner's own Origin.
+    for (const [method, path] of [["POST", `/api/recipes/${meal.id}/variants`], ["PATCH", `/api/recipes/${meal.id}/variants/${fryId}`], ["DELETE", `/api/recipes/${meal.id}/variants/${fryId}`]] as const)
+      assert.equal((await f.call(path, method, { label: "x", recipe: fry }, { origin: "http://evil.test" })).status, 403);
+  } finally { await f.close(); }
+});
+
+test("POST /api/recipes adds or replaces a variant by label", async () => {
+  const f = await fixture();
+  try {
+    const created = await f.call("/api/recipes", "POST", { name: "Tomato Sambar", recipe: dosa });
+    assert.equal(created.status, 201);
+    assert.deepEqual(created.json.variants.map((v: VariantSummary) => v.label), [""]);
+    // "Add a Fry variant of Tomato Sambar"; the first one is labelled "Original" if not named.
+    const added = await f.call("/api/recipes", "POST", { name: "tomato  sambar", variant: "Fry", recipe: fry });
+    assert.equal(added.status, 200, added.text);
+    assert.deepEqual([added.json.created, added.json.variant.label], [false, "Fry"]);
+    assert.deepEqual(added.json.variants.map((v: VariantSummary) => [v.label, v.isDefault]), [["Original", true], ["Fry", false]]);
+    // The same label again needs replace; replace keeps the variant id.
+    assert.equal((await f.call("/api/recipes", "POST", { name: "Tomato Sambar", variant: "fry", recipe: fry })).status, 409);
+    const replaced = await f.call("/api/recipes", "POST", { name: "Tomato Sambar", variant: "fry", replace: true, recipe: { notes: "New" } });
+    assert.deepEqual([replaced.json.variant.id, replaced.json.recipe.notes], [added.json.variant.id, "New"]);
+    // Without a variant label it is the default recipe, as before.
+    assert.equal((await f.call("/api/recipes", "POST", { name: "Tomato Sambar", recipe: dosa })).status, 409);
+    const def = await f.call("/api/recipes", "POST", { name: "Tomato Sambar", replace: true, recipe: { notes: "Default" } });
+    assert.deepEqual([def.json.variant.label, def.json.recipe.notes], ["Original", "Default"]);
+    // A new meal can start with a labelled variant, and existingLabel names the first.
+    const pongal = await f.call("/api/recipes", "POST", { name: "Pongal", recipe: dosa });
+    const second = await f.call("/api/recipes", "POST", { name: "Pongal", variant: "Sweet", existingLabel: "Ven", recipe: fry });
+    assert.deepEqual(second.json.variants.map((v: VariantSummary) => v.label), ["Ven", "Sweet"]);
+    assert.equal(f.store.db.libraryAll().length, 2, pongal.text);
+    assert.equal((await f.call("/api/recipes", "POST", { name: "Pongal", variant: "", recipe: fry })).status, 409, "empty label means the default");
+  } finally { await f.close(); }
+});
+
+test("prep reminders come from the default variant only", async () => {
+  const f = await fixture();
+  try {
+    const meal = await f.store.addLibrary("தோசை");
+    const plain = (await f.call(`/api/recipes/${meal.id}`, "PUT", { ...dosa, prep: [] })).json.variant.id as string;
+    const soaked = await f.call(`/api/recipes/${meal.id}/variants`, "POST", { label: "Soaked", existingLabel: "Instant", recipe: dosa });
+    const board = await f.store.board(f.provider);
+    await f.plan(meal.id, "2030-10-02", board.slots.findIndex((slot) => slot.time === "08:00"));
+    const window = `/api/prep?from=${encodeURIComponent("2030-10-01T00:00")}&to=${encodeURIComponent("2030-10-02T00:00")}`;
+    assert.deepEqual((await f.call(window)).json.reminders, [], "the non-default variant's prep is not reminded");
+    await f.call(`/api/recipes/${meal.id}/variants/${soaked.json.variant.id}`, "PATCH", { isDefault: true });
+    assert.deepEqual((await f.call(window)).json.reminders.map((item: { text: string }) => item.text), ["Soak rice and urad dal", "Grind and ferment the batter"]);
+    await f.call(`/api/recipes/${meal.id}/variants/${plain}`, "PATCH", { isDefault: true });
+    assert.deepEqual((await f.call(window)).json.reminders, []);
   } finally { await f.close(); }
 });

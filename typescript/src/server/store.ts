@@ -15,12 +15,62 @@ import type {
 import type { Todoist } from "./todoist";
 import { completionRequestId, reopenRequestId } from "./todoist";
 import { TodoistError } from "./todoist-api";
-import { parseRecipe, type Recipe, type StoredRecipe } from "../recipe";
+import {
+  cleanVariantLabel, fallbackVariantLabel, maxVariantLabelLength, maxVariants, parseRecipe, variantLabelKey,
+  type Recipe, type StoredRecipe, type VariantSummary,
+} from "../recipe";
 import { prepReminders, RequestError, resolveCardMeal } from "./recipes";
-import type { RecipeRow } from "./persistence";
+import type { Persistence as Db, RecipeRow } from "./persistence";
 function storedRecipe(row: RecipeRow): StoredRecipe {
   return { ...(JSON.parse(row.body) as Recipe), updatedAt: row.updatedAt };
 }
+function variantSummary(row: RecipeRow): VariantSummary {
+  return { id: row.id, label: row.label, isDefault: row.isDefault, updatedAt: row.updatedAt };
+}
+// What every recipe read and write returns: the meal, one variant's recipe
+// (the default unless another was asked for), which variant that is, and all
+// of the meal's variants in order. With `all`, each variant carries its full
+// recipe too, so a client can cache every variant from one response.
+export type RecipeResponse = {
+  meal: Meal;
+  recipe: StoredRecipe;
+  variant: VariantSummary;
+  variants: (VariantSummary & { recipe?: StoredRecipe })[];
+};
+function recipeResponse(meal: Meal, rows: RecipeRow[], row: RecipeRow, all = false): RecipeResponse {
+  return {
+    meal: { ...meal, hasRecipe: true, variantCount: rows.length },
+    recipe: storedRecipe(row),
+    variant: variantSummary(row),
+    variants: rows.map((entry) => ({ ...variantSummary(entry), ...(all ? { recipe: storedRecipe(entry) } : {}) })),
+  };
+}
+function parseLabel(value: unknown, field = "label", required = true) {
+  if (value === undefined || value === null) {
+    if (required) throw new RequestError(`${field} is required`);
+    return undefined;
+  }
+  if (typeof value !== "string") throw new RequestError(`${field} must be a string`);
+  const label = cleanVariantLabel(value);
+  if ((required && !label) || label.length > maxVariantLabelLength)
+    throw new RequestError(`${field} must be 1–${maxVariantLabelLength} characters`);
+  return label;
+}
+function checkVariantId(variantId: string) {
+  if (!uuidPattern.test(variantId)) throw new RequestError("Invalid variant ID");
+}
+// A label already used by another variant of the same meal (case ignored).
+function labelTaken(rows: RecipeRow[], label: string, except?: string) {
+  const key = variantLabelKey(label);
+  return rows.find((row) => row.id !== except && variantLabelKey(row.label) === key);
+}
+export type NewVariant = {
+  label: string;
+  recipe: Recipe;
+  // Label for the meal's existing unlabeled recipe (default "Original").
+  existingLabel?: string;
+  isDefault?: boolean;
+};
 export const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 // Prefer an authoritative, task-scoped read; a cached active listing can lag
@@ -281,14 +331,15 @@ export class Store {
       }
       const slots = this.db.slotAll();
       const library = this.libraryMeals();
-      const recipeIds = this.db.recipeIds();
+      const variantCounts = this.db.recipeCounts();
       for (const card of cards) {
         card.slotId =
           slots.find((slot) => slot.time === card.time)?.id ??
           settings.aliases[card.time];
         const meal = resolveCardMeal(card, library);
         card.libraryMealId = meal?.id ?? null;
-        card.hasRecipe = !!meal && recipeIds.has(meal.id);
+        card.variantCount = (meal && variantCounts.get(meal.id)) || 0;
+        card.hasRecipe = card.variantCount > 0;
       }
       const sort = <T extends { id: string }>(items: T[], order: string[]) =>
         items.sort((a, b) => {
@@ -302,7 +353,7 @@ export class Store {
         projectId: project.id,
         receivedRequests: operations.map((row) => row.id),
         library: sort(
-          library.map((meal) => ({ ...meal, hasRecipe: recipeIds.has(meal.id) })),
+          library.map((meal) => ({ ...meal, hasRecipe: variantCounts.has(meal.id), variantCount: variantCounts.get(meal.id) ?? 0 })),
           settings.libraryOrder,
         ),
         slots: sortSlotsByTime(sort(slots, settings.slotOrder)),
@@ -382,72 +433,209 @@ export class Store {
   // Library meals with whether each has a recipe, alphabetically; with a name,
   // only the meal that name (or alternate name) resolves to.
   recipeIndex(name?: string): Meal[] {
-    const ids = this.db.recipeIds();
-    const library = this.libraryMeals().map((meal) => ({ ...meal, hasRecipe: ids.has(meal.id) }));
+    const counts = this.db.recipeCounts();
+    const library = this.libraryMeals().map((meal) => ({ ...meal, hasRecipe: counts.has(meal.id), variantCount: counts.get(meal.id) ?? 0 }));
     if (name !== undefined) {
       const meal = resolveCardMeal({ name }, library);
       return meal ? [meal] : [];
     }
     return library.sort((a, b) => a.name.localeCompare(b.name));
   }
-  recipe(mealId: string): { meal: Meal; recipe: StoredRecipe } {
+  private recipeMeal(db: Db, mealId: string): Meal {
     if (!uuidPattern.test(mealId)) throw new RequestError("Invalid meal ID");
-    const meal = this.libraryMeals().find((entry) => entry.id === mealId);
+    const meal = this.libraryMeals(db).find((entry) => entry.id === mealId);
     if (!meal) throw new RequestError("Meal not found", 404);
-    const row = this.db.recipeGet(mealId);
-    if (!row) throw new RequestError("This meal has no recipe", 404);
-    return { meal: { ...meal, hasRecipe: true }, recipe: storedRecipe(row) };
+    return meal;
   }
-  // Creates or replaces a meal's whole recipe.
-  async saveRecipe(mealId: string, input: unknown) {
+  private variant(rows: RecipeRow[], variantId: string) {
+    checkVariantId(variantId);
+    const row = rows.find((entry) => entry.id === variantId);
+    if (!row) throw new RequestError("Variant not found", 404);
+    return row;
+  }
+  // A meal's recipe: the default variant, or `variantId`'s.
+  recipe(mealId: string, variantId?: string, all = false): RecipeResponse {
+    const meal = this.recipeMeal(this.db, mealId);
+    const rows = this.db.recipeVariants(mealId);
+    if (!rows.length) throw new RequestError("This meal has no recipe", 404);
+    const row = variantId ? this.variant(rows, variantId) : rows.find((entry) => entry.isDefault) ?? rows[0]!;
+    return recipeResponse(meal, rows, row, all);
+  }
+  // Replaces one variant's whole recipe (the default when no variant is
+  // given). A meal without a recipe gets it as its single, unlabeled variant.
+  async saveRecipe(mealId: string, input: unknown, variantId?: string) {
     if (!uuidPattern.test(mealId)) throw new RequestError("Invalid meal ID");
+    if (variantId) checkVariantId(variantId);
     const recipe = parseRecipe(input);
     return this.write(() =>
       this.db.transaction((tx) => {
-        const meal = this.libraryMeals(tx).find((entry) => entry.id === mealId);
-        if (!meal) throw new RequestError("Meal not found", 404);
-        const row = { mealId, body: JSON.stringify(recipe), updatedAt: new Date().toISOString() };
-        tx.recipePut(row);
-        return { meal: { ...meal, hasRecipe: true }, recipe: storedRecipe(row) };
+        const meal = this.recipeMeal(tx, mealId);
+        const rows = tx.recipeVariants(mealId);
+        if (!rows.length && !variantId) return this.insertVariant(tx, meal, rows, { label: "", recipe, isDefault: true });
+        const row = variantId ? this.variant(rows, variantId) : rows.find((entry) => entry.isDefault)!;
+        return this.replaceVariant(tx, meal, row.id, recipe);
       }),
     );
   }
+  private replaceVariant(tx: Db, meal: Meal, variantId: string, recipe: Recipe, all = false) {
+    tx.recipeUpdate(variantId, { body: JSON.stringify(recipe), updatedAt: new Date().toISOString() });
+    const rows = tx.recipeVariants(meal.id);
+    return recipeResponse(meal, rows, rows.find((entry) => entry.id === variantId)!, all);
+  }
+  // Adds a variant after the meal's others. When the meal so far has one
+  // unlabeled recipe, that one is labelled `existingLabel` (or "Original"),
+  // since a meal with several variants needs a label on each.
+  private insertVariant(tx: Db, meal: Meal, rows: RecipeRow[], input: NewVariant) {
+    if (rows.length >= maxVariants) throw new RequestError(`A meal can have at most ${maxVariants} variants`, 409);
+    if (rows.length && !input.label) throw new RequestError("label is required");
+    if (input.label && labelTaken(rows, input.label))
+      throw new RequestError(`${meal.name} already has a variant called “${labelTaken(rows, input.label)!.label}”`, 409);
+    if (rows.length === 1 && !rows[0]!.label) {
+      const existing = input.existingLabel || fallbackVariantLabel;
+      if (variantLabelKey(existing) === variantLabelKey(input.label))
+        throw new RequestError(`The existing recipe and the new variant need different labels`, 409);
+      tx.recipeUpdate(rows[0]!.id, { label: existing });
+    }
+    const row: RecipeRow = {
+      id: randomUUID(),
+      mealId: meal.id,
+      label: input.label,
+      isDefault: !rows.length,
+      position: Math.max(-1, ...rows.map((entry) => entry.position)) + 1,
+      body: JSON.stringify(input.recipe),
+      updatedAt: new Date().toISOString(),
+    };
+    tx.recipeInsert(row);
+    if (input.isDefault && rows.length) tx.recipeSetDefault(meal.id, row.id);
+    const after = tx.recipeVariants(meal.id);
+    return recipeResponse(meal, after, after.find((entry) => entry.id === row.id)!);
+  }
+  // POST /api/recipes/<mealId>/variants: a new variant with its own whole
+  // recipe, or a copy of another variant's (`copyFrom`).
+  async addVariant(mealId: string, body: Record<string, unknown>) {
+    if (!uuidPattern.test(mealId)) throw new RequestError("Invalid meal ID");
+    const allowed = ["label", "recipe", "copyFrom", "existingLabel", "isDefault"];
+    const unknown = Object.keys(body).filter((key) => !allowed.includes(key));
+    if (unknown.length) throw new RequestError(`Unknown field "${unknown[0]}" (allowed: ${allowed.join(", ")})`);
+    const label = parseLabel(body.label)!;
+    const existingLabel = parseLabel(body.existingLabel, "existingLabel", false);
+    if (body.isDefault !== undefined && typeof body.isDefault !== "boolean") throw new RequestError("isDefault must be true or false");
+    if ((body.recipe === undefined) === (body.copyFrom === undefined)) throw new RequestError("Send either recipe or copyFrom");
+    if (body.copyFrom !== undefined && typeof body.copyFrom !== "string") throw new RequestError("copyFrom must be a variant ID");
+    const parsed = body.recipe === undefined ? undefined : parseRecipe(body.recipe);
+    return this.write(() =>
+      this.db.transaction((tx) => {
+        const meal = this.recipeMeal(tx, mealId);
+        const rows = tx.recipeVariants(mealId);
+        const recipe = parsed ?? (JSON.parse(this.variant(rows, body.copyFrom as string).body) as Recipe);
+        return this.insertVariant(tx, meal, rows, { label, recipe, existingLabel, isDefault: body.isDefault === true });
+      }),
+    );
+  }
+  // PATCH a variant: rename it (`label`) and/or make it the default
+  // (`isDefault: true`). A label may be empty only while it is the meal's
+  // only variant.
+  async updateVariant(mealId: string, variantId: string, body: Record<string, unknown>) {
+    if (!uuidPattern.test(mealId)) throw new RequestError("Invalid meal ID");
+    checkVariantId(variantId);
+    const unknown = Object.keys(body).filter((key) => key !== "label" && key !== "isDefault");
+    if (unknown.length) throw new RequestError(`Unknown field "${unknown[0]}" (allowed: label, isDefault)`);
+    if (body.isDefault !== undefined && body.isDefault !== true)
+      throw new RequestError("isDefault can only be set to true; make another variant the default instead");
+    const label = parseLabel(body.label, "label", false);
+    if (label === undefined && body.isDefault === undefined) throw new RequestError("Send label and/or isDefault");
+    return this.write(() =>
+      this.db.transaction((tx) => {
+        const meal = this.recipeMeal(tx, mealId);
+        const rows = tx.recipeVariants(mealId);
+        const row = this.variant(rows, variantId);
+        if (label !== undefined) {
+          if (!label && rows.length > 1) throw new RequestError("label must be 1–40 characters while the meal has several variants");
+          const taken = label && labelTaken(rows, label, row.id);
+          if (taken) throw new RequestError(`${meal.name} already has a variant called “${taken.label}”`, 409);
+          if (label !== row.label) tx.recipeUpdate(row.id, { label });
+        }
+        if (body.isDefault === true && !row.isDefault) tx.recipeSetDefault(mealId, row.id);
+        const after = tx.recipeVariants(mealId);
+        return recipeResponse(meal, after, after.find((entry) => entry.id === row.id)!);
+      }),
+    );
+  }
+  // Removes one variant. Removing the default makes the first remaining
+  // variant the default; removing the last leaves the meal without a recipe.
+  // An unknown variant answers deleted: false, so repeating a delete is safe.
+  async deleteVariant(mealId: string, variantId: string) {
+    if (!uuidPattern.test(mealId)) throw new RequestError("Invalid meal ID");
+    checkVariantId(variantId);
+    return this.write(() =>
+      this.db.transaction((tx) => {
+        this.recipeMeal(tx, mealId);
+        const row = tx.recipeVariants(mealId).find((entry) => entry.id === variantId);
+        if (!row) return this.afterDelete(tx, mealId, false);
+        tx.recipeDeleteVariant(row.id);
+        return this.afterDelete(tx, mealId, true);
+      }),
+    );
+  }
+  private afterDelete(tx: Db, mealId: string, deleted: boolean) {
+    let rows = tx.recipeVariants(mealId);
+    if (rows.length && !rows.some((entry) => entry.isDefault)) {
+      tx.recipeSetDefault(mealId, rows[0]!.id);
+      rows = tx.recipeVariants(mealId);
+    }
+    return { deleted, variants: rows.map(variantSummary) };
+  }
   // For assistants adding "a recipe for X": finds the library meal by name or
-  // alternate name, creating it when missing, and saves its recipe. An existing
-  // recipe is replaced only when `replace` is true.
-  async saveRecipeByName(name: unknown, input: unknown, replace: boolean) {
+  // alternate name, creating it when missing, and saves its recipe. Without
+  // `variant` this is the meal's default recipe, replaced only when `replace`
+  // is true. With `variant` (a label) it is that variant: added when the meal
+  // has none by that label, else replaced only when `replace` is true.
+  async saveRecipeByName(name: unknown, input: unknown, replace: boolean, variant?: unknown, existingLabel?: unknown) {
     if (typeof name !== "string") throw new RequestError("name is required");
     const cleaned = cleanMealName(name);
+    const label = parseLabel(variant, "variant", false);
+    const existing = parseLabel(existingLabel, "existingLabel", false);
     const recipe = parseRecipe(input);
     return this.write(() =>
       this.db.transaction((tx) => {
         let meal = findMealByName(this.libraryMeals(tx), cleaned);
-        if (meal && tx.recipeGet(meal.id) && !replace)
+        const rows = meal ? tx.recipeVariants(meal.id) : [];
+        const target = label ? labelTaken(rows, label) : rows.find((entry) => entry.isDefault);
+        if (meal && target && !replace)
           throw new RequestError(
-            `${meal.name} already has a recipe. Send "replace": true to overwrite it, or PUT /api/recipes/${meal.id}`,
+            label
+              ? `${meal.name} already has a “${target.label}” variant. Send "replace": true to overwrite it, or PUT /api/recipes/${meal.id}/variants/${target.id}`
+              : `${meal.name} already has a recipe. Send "replace": true to overwrite it, or PUT /api/recipes/${meal.id}`,
             409,
           );
         const created = !meal;
         meal ??= { ...tx.libraryInsert({ id: randomUUID(), name: cleaned }), aliases: [] };
-        const row = { mealId: meal.id, body: JSON.stringify(recipe), updatedAt: new Date().toISOString() };
-        tx.recipePut(row);
-        return { created, meal: { ...meal, hasRecipe: true }, recipe: storedRecipe(row) };
+        const saved = target
+          ? this.replaceVariant(tx, meal, target.id, recipe)
+          : this.insertVariant(tx, meal, rows, { label: label ?? "", recipe, existingLabel: existing });
+        return { created, ...saved };
       }),
     );
   }
-  async deleteRecipe(mealId: string) {
+  // DELETE /api/recipes/<mealId>: removes the default variant (the whole
+  // recipe of a single-recipe meal), or with `all` every variant.
+  async deleteRecipe(mealId: string, all = false) {
     if (!uuidPattern.test(mealId)) throw new RequestError("Invalid meal ID");
     return this.write(() =>
       this.db.transaction((tx) => {
-        if (!tx.libraryGet(mealId)) throw new RequestError("Meal not found", 404);
-        return { deleted: tx.recipeDelete(mealId) };
+        this.recipeMeal(tx, mealId);
+        if (all) return this.afterDelete(tx, mealId, tx.recipeDeleteMeal(mealId) > 0);
+        const row = tx.recipeVariants(mealId).find((entry) => entry.isDefault);
+        if (row) tx.recipeDeleteVariant(row.id);
+        return this.afterDelete(tx, mealId, !!row);
       }),
     );
   }
   // Prep reminders due in [from, to) for planned meals from two weeks back on.
+  // Only each meal's default variant counts: the variant is chosen at the stove.
   async prep(todoist: Todoist, from: number, to: number, includeOverdue = false) {
     const board = await this.board(todoist);
-    const recipes = new Map(this.db.recipeAll().map((row) => [row.mealId, storedRecipe(row)] as const));
+    const recipes = new Map(this.db.recipeDefaults().map((row) => [row.mealId, storedRecipe(row)] as const));
     return prepReminders(board.cards, board.slots, board.library, recipes, from, to, includeOverdue);
   }
   async shuffle() {

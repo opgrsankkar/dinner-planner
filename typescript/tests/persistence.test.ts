@@ -36,7 +36,7 @@ test("adopt original schema without rewriting data, metadata or journal mode", (
     const check = new DatabaseSync(path);
     for (const [table, rows] of snapshot) assert.deepEqual(check.prepare(`SELECT * FROM ${table}`).all(), rows);
     assert.equal(check.prepare("PRAGMA journal_mode").get()!.journal_mode, "delete");
-    assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 1);
+    assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 2);
     check.close();
     const restarted = new Persistence(path);
     assert.equal(restarted.localReceiptGet(requestId)?.body, "{}");
@@ -59,11 +59,11 @@ test("rollback keeps multi-table changes and receipts atomic; future schemas fai
     assert.equal(db.localReceiptGet(id), undefined);
     db.transaction(tx => tx.libraryInsert({ id, name: "Committed" }));
     db.close();
-    const future = new DatabaseSync(path); future.exec("PRAGMA user_version=2"); future.close();
-    assert.throws(() => new Persistence(path), /Unsupported database version 2/);
+    const future = new DatabaseSync(path); future.exec("PRAGMA user_version=3"); future.close();
+    assert.throws(() => new Persistence(path), /Unsupported database version 3/);
     const check = new DatabaseSync(path);
     assert.equal(check.prepare("SELECT name FROM library WHERE id=?").get(id)!.name, "Committed");
-    assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 2);
+    assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 3);
     check.close();
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
