@@ -55,7 +55,7 @@ export function mealsCalendar(cards: Card[], slots: Slot[], now: Date): string {
   ];
   const stamp = utcStamp(now);
   const meals = cards
-    .filter((card) => card.state === "saved" && !card.deleting && card.time && card.date >= from && card.date <= until)
+    .filter((card) => card.time && card.date >= from && card.date <= until)
     .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
   for (const card of meals) {
     const start = slotStart(card.date, card.time);

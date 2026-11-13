@@ -1,19 +1,22 @@
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
+import { existsSync, renameSync, rmSync } from "node:fs";
 
 export type LibraryRow = { id: string; name: string };
 export type LibraryAliasRow = { mealId: string; name: string };
 export type SlotRow = { id: string; name: string; time: string };
-export type LocalMealRow = { id: string; body: string };
-export type LocalReceiptRow = { id: string; body: string };
-export type OutboxRow = { id: string; payload: string; state: string; error: string; remoteId: string; attempted: string; nextAt: string; confirmedAt: string };
+// A meal planned into a slot. `mealId` is the library meal it was planned from
+// (null for meals planned before that was recorded, or whose meal was removed:
+// there is deliberately no foreign key, so a planned meal outlives its library
+// meal). Completion is not stored; it follows the clock (see isPastSlot).
+export type PlannedRow = { id: string; mealId: string | null; name: string; date: string; time: string };
 export type SettingRow = { id: string; value: string };
 // One recipe variant of a library meal. A meal with a recipe has one or more
 // variants ("Non-fry", "Fry"), exactly one of them the default. A meal with a
 // single recipe has one variant, usually with an empty label.
 export type RecipeRow = { id: string; mealId: string; label: string; isDefault: boolean; position: number; body: string; updatedAt: string };
 
-export const schemaVersion = 2;
+export const schemaVersion = 3;
 const recipeTable = '"recipe" ("id" CHARACTER NOT NULL PRIMARY KEY, "mealId" CHARACTER NOT NULL REFERENCES "library" ("id") ON DELETE CASCADE, "label" TEXT NOT NULL, "isDefault" INTEGER NOT NULL, "position" INTEGER NOT NULL, "body" TEXT NOT NULL, "updatedAt" TEXT NOT NULL)';
 const recipeColumns = '"id", "mealId", "label", "isDefault", "position", "body", "updatedAt"';
 function recipeRow(row: Record<string, unknown>): RecipeRow {
@@ -24,6 +27,11 @@ function recipeRow(row: Record<string, unknown>): RecipeRow {
 // Version 1 adopts the original text/CHARACTER tables without rewriting their rows.
 // Version 2 turns the one-recipe-per-meal "recipe" table into recipe variants;
 // each existing recipe becomes its meal's single, unlabeled default variant.
+// Version 3 drops the Todoist-era write path: planned meals move from JSON
+// bodies in "local_meal" into the "planned_meal" table, and the "outbox",
+// "local_receipt" and retired login "session" tables are dropped. A copy of the
+// database is taken first (`<path>.pre-v3`); an older build refuses version 3,
+// so that copy is the rollback.
 export class Persistence {
   private readonly connection: DatabaseSync;
   private readonly statements = new Map<string, StatementSync>();
@@ -33,6 +41,7 @@ export class Persistence {
       this.connection.exec("PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON");
       const version = Number(this.connection.prepare("PRAGMA user_version").get()!.user_version);
       if (version > schemaVersion) throw new Error(`Unsupported database version ${version}`);
+      if (version < 3) this.backupBeforeV3(path);
       this.connection.exec("BEGIN IMMEDIATE");
       try {
         this.connection.exec('CREATE TABLE IF NOT EXISTS "library" ("id" CHARACTER NOT NULL PRIMARY KEY, "name" TEXT NOT NULL)');
@@ -41,14 +50,55 @@ export class Persistence {
         this.connection.exec('CREATE TABLE IF NOT EXISTS "library_alias" ("mealId" CHARACTER NOT NULL REFERENCES "library" ("id") ON DELETE CASCADE, "name" TEXT NOT NULL, "position" INTEGER NOT NULL, PRIMARY KEY ("mealId", "position"))');
         this.migrateRecipes();
         this.connection.exec('CREATE TABLE IF NOT EXISTS "slot" ("id" CHARACTER NOT NULL PRIMARY KEY, "name" TEXT NOT NULL, "time" TEXT NOT NULL)');
-        this.connection.exec('CREATE TABLE IF NOT EXISTS "local_meal" ("id" CHARACTER NOT NULL PRIMARY KEY, "body" TEXT NOT NULL)');
-        this.connection.exec('CREATE TABLE IF NOT EXISTS "local_receipt" ("id" CHARACTER NOT NULL PRIMARY KEY, "body" TEXT NOT NULL)');
-        this.connection.exec('CREATE TABLE IF NOT EXISTS "outbox" ("id" CHARACTER NOT NULL PRIMARY KEY, "payload" TEXT NOT NULL, "state" TEXT NOT NULL, "error" TEXT NOT NULL, "remoteId" TEXT NOT NULL, "attempted" TEXT NOT NULL, "nextAt" TEXT NOT NULL, "confirmedAt" TEXT NOT NULL)');
         this.connection.exec('CREATE TABLE IF NOT EXISTS "setting" ("id" CHARACTER NOT NULL PRIMARY KEY, "value" TEXT NOT NULL)');
-        this.connection.exec('CREATE TABLE IF NOT EXISTS "session" ("id" CHARACTER NOT NULL PRIMARY KEY, "csrf" TEXT NOT NULL, "expiresAt" TEXT NOT NULL)');
+        this.connection.exec('CREATE TABLE IF NOT EXISTS "planned_meal" ("id" CHARACTER NOT NULL PRIMARY KEY, "mealId" CHARACTER, "name" TEXT NOT NULL, "date" TEXT NOT NULL, "time" TEXT NOT NULL)');
+        this.connection.exec('CREATE INDEX IF NOT EXISTS "planned_meal_date" ON "planned_meal" ("date")');
+        if (version < 3) this.migratePlannedMeals();
         this.connection.exec(`PRAGMA user_version=${schemaVersion}; COMMIT`);
       } catch (error) { this.connection.exec("ROLLBACK"); throw error; }
     } catch (error) { this.connection.close(); throw error; }
+  }
+  private hasTable(name: string) {
+    return !!this.connection.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
+  }
+  // A consistent copy of an existing pre-v3 database, kept beside it. VACUUM
+  // cannot run inside a transaction, so this happens before the migration; the
+  // temporary name means a copy cut short is never taken for a good one.
+  private backupBeforeV3(path: string) {
+    if (path === ":memory:" || !this.connection.prepare("SELECT 1 FROM sqlite_master").get()) return;
+    const target = `${path}.pre-v3`;
+    if (existsSync(target)) return;
+    const temporary = `${target}.tmp`;
+    rmSync(temporary, { force: true });
+    this.connection.prepare("VACUUM INTO ?").run(temporary);
+    renameSync(temporary, target);
+  }
+  // Copies each local_meal JSON body into planned_meal, keeping its id (the
+  // calendar feed's UID), then drops the Todoist-era tables. Outbox rows that
+  // were never saved are logged, since dropping them discards that intent.
+  private migratePlannedMeals() {
+    let copied = 0, found = 0;
+    if (this.hasTable("local_meal")) {
+      const insert = this.connection.prepare('INSERT INTO "planned_meal" ("id", "mealId", "name", "date", "time") VALUES (?, ?, ?, ?, ?) ON CONFLICT ("id") DO NOTHING');
+      for (const row of this.connection.prepare('SELECT "id", "body" FROM "local_meal"').all()) {
+        found++;
+        const meal = JSON.parse(String(row.body)) as { name?: string; date?: string; time?: string; mealId?: string };
+        copied += Number(insert.run(String(row.id), meal.mealId ?? null, meal.name ?? "", meal.date ?? "", meal.time ?? "").changes);
+      }
+    }
+    let outbox = 0;
+    const unsaved: string[] = [];
+    if (this.hasTable("outbox")) {
+      for (const row of this.connection.prepare('SELECT "id", "payload", "state" FROM "outbox"').all()) {
+        outbox++;
+        if (row.state !== "saved") unsaved.push(`${String(row.id)} ${String(row.payload)}`);
+      }
+    }
+    for (const table of ["outbox", "local_receipt", "local_meal", "session"])
+      this.connection.exec(`DROP TABLE IF EXISTS "${table}"`);
+    if (found || outbox)
+      console.log(`planner: schema v3: local_meal ${found} → planned_meal ${copied}; outbox dropped ${outbox} (${unsaved.length} not saved)`);
+    for (const line of unsaved) console.log(`planner: dropped unsaved outbox row ${line}`);
   }
   // Recipes (JSON bodies) belong to library meals; removing a meal removes them.
   // The first recipes build (schema 1) kept one row per meal keyed by mealId;
@@ -129,39 +179,19 @@ export class Persistence {
     return row;
   }
   slotDelete(id: string) { this.prepare('DELETE FROM "slot" WHERE id = ?').run(id); }
-  localMealAll(): LocalMealRow[] { return this.prepare('SELECT "id", "body" FROM "local_meal"').all().map(row => ({ ...row })) as LocalMealRow[]; }
-  localMealGet(id: string): LocalMealRow | undefined { const row = this.prepare('SELECT "id", "body" FROM "local_meal" WHERE id = ?').get(id); return row ? { ...row } as LocalMealRow : undefined; }
-  localMealInsert(input: Omit<LocalMealRow, "id"> & { id?: string }): LocalMealRow {
-    const row = { ...input, id: input.id ?? randomUUID() };
-    this.prepare('INSERT INTO "local_meal" ("id", "body") VALUES (?, ?)').run(row.id, row.body);
-    return row;
+  // Planned meals dated in [from, until).
+  plannedRange(from: string, until: string): PlannedRow[] {
+    return this.prepare('SELECT "id", "mealId", "name", "date", "time" FROM "planned_meal" WHERE "date" >= ? AND "date" < ? ORDER BY "date", "time", "rowid"').all(from, until).map(row => ({ ...row })) as PlannedRow[];
   }
-  localMealDelete(id: string) { this.prepare('DELETE FROM "local_meal" WHERE id = ?').run(id); }
-  localMealUpdate(id: string, patch: Partial<Omit<LocalMealRow, "id">>) {
-    const columns = ["body"].filter(column => patch[column as keyof typeof patch] !== undefined);
-    if (!columns.length) return;
-    this.prepare('UPDATE "local_meal" SET ' + columns.map(column => '"' + column + '" = ?').join(', ') + ' WHERE id = ?')
-      .run(...columns.map(column => patch[column as keyof typeof patch]!), id);
+  plannedGet(id: string): PlannedRow | undefined { const row = this.prepare('SELECT "id", "mealId", "name", "date", "time" FROM "planned_meal" WHERE "id" = ?').get(id); return row ? { ...row } as PlannedRow : undefined; }
+  // False when a meal with this id already exists (a repeated request).
+  plannedInsert(row: PlannedRow): boolean {
+    return Number(this.prepare('INSERT INTO "planned_meal" ("id", "mealId", "name", "date", "time") VALUES (?, ?, ?, ?, ?) ON CONFLICT ("id") DO NOTHING').run(row.id, row.mealId, row.name, row.date, row.time).changes) > 0;
   }
-  localReceiptGet(id: string): LocalReceiptRow | undefined { const row = this.prepare('SELECT "id", "body" FROM "local_receipt" WHERE id = ?').get(id); return row ? { ...row } as LocalReceiptRow : undefined; }
-  localReceiptInsert(input: Omit<LocalReceiptRow, "id"> & { id?: string }): LocalReceiptRow {
-    const row = { ...input, id: input.id ?? randomUUID() };
-    this.prepare('INSERT INTO "local_receipt" ("id", "body") VALUES (?, ?)').run(row.id, row.body);
-    return row;
+  plannedMove(id: string, date: string, time: string): boolean {
+    return Number(this.prepare('UPDATE "planned_meal" SET "date" = ?, "time" = ? WHERE "id" = ?').run(date, time, id).changes) > 0;
   }
-  outboxAll(): OutboxRow[] { return this.prepare('SELECT "id", "payload", "state", "error", "remoteId", "attempted", "nextAt", "confirmedAt" FROM "outbox"').all().map(row => ({ ...row })) as OutboxRow[]; }
-  outboxGet(id: string): OutboxRow | undefined { const row = this.prepare('SELECT "id", "payload", "state", "error", "remoteId", "attempted", "nextAt", "confirmedAt" FROM "outbox" WHERE id = ?').get(id); return row ? { ...row } as OutboxRow : undefined; }
-  outboxInsert(input: Omit<OutboxRow, "id"> & { id?: string }): OutboxRow {
-    const row = { ...input, id: input.id ?? randomUUID() };
-    this.prepare('INSERT INTO "outbox" ("id", "payload", "state", "error", "remoteId", "attempted", "nextAt", "confirmedAt") VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(row.id, row.payload, row.state, row.error, row.remoteId, row.attempted, row.nextAt, row.confirmedAt);
-    return row;
-  }
-  outboxUpdate(id: string, patch: Partial<Omit<OutboxRow, "id">>) {
-    const columns = ["payload", "state", "error", "remoteId", "attempted", "nextAt", "confirmedAt"].filter(column => patch[column as keyof typeof patch] !== undefined);
-    if (!columns.length) return;
-    this.prepare('UPDATE "outbox" SET ' + columns.map(column => '"' + column + '" = ?').join(', ') + ' WHERE id = ?')
-      .run(...columns.map(column => patch[column as keyof typeof patch]!), id);
-  }
+  plannedDelete(id: string) { this.prepare('DELETE FROM "planned_meal" WHERE "id" = ?').run(id); }
   settingAll(): SettingRow[] { return this.prepare('SELECT "id", "value" FROM "setting"').all().map(row => ({ ...row })) as SettingRow[]; }
   settingGet(id: string): SettingRow | undefined { const row = this.prepare('SELECT "id", "value" FROM "setting" WHERE id = ?').get(id); return row ? { ...row } as SettingRow : undefined; }
   settingInsert(input: Omit<SettingRow, "id"> & { id?: string }): SettingRow {
@@ -174,12 +204,5 @@ export class Persistence {
     if (!columns.length) return;
     this.prepare('UPDATE "setting" SET ' + columns.map(column => '"' + column + '" = ?').join(', ') + ' WHERE id = ?')
       .run(...columns.map(column => patch[column as keyof typeof patch]!), id);
-  }
-  // Drops acknowledged outbox rows older than `before` (ms), receipts that no
-  // longer belong to an outbox row, and rows left from the retired login.
-  outboxPrune(before: number) {
-    this.prepare('DELETE FROM "outbox" WHERE "state" = \'saved\' AND CAST("confirmedAt" AS INTEGER) < ?').run(before);
-    this.prepare('DELETE FROM "local_receipt" WHERE "id" NOT IN (SELECT "id" FROM "outbox")').run();
-    this.prepare('DELETE FROM "session"').run();
   }
 }

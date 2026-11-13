@@ -6,7 +6,6 @@ __pycache__/
 .env
 secrets/*
 !secrets/.gitkeep
-!secrets/todoist-token.example
 data/*
 !data/.gitkeep
 app/frontend/node_modules/

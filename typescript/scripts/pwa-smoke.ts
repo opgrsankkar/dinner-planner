@@ -12,7 +12,7 @@ const directory = await mkdtemp(join(tmpdir(), "planner-pwa-"));
 const origin = "http://127.0.0.1:3199";
 const server = spawn(process.execPath, ["scripts/serve.mjs"], {
   env: {
-    ...process.env, TODOIST_MODE: "local", DATABASE_PATH: join(directory, "planner.sqlite"),
+    ...process.env, DATABASE_PATH: join(directory, "planner.sqlite"),
     PLANNER_ORIGIN: origin, HOST: "127.0.0.1", PORT: "3199", ALLOWED_HOSTS: "127.0.0.1",
   },
   stdio: "inherit",

@@ -12,7 +12,7 @@ This is a single-user pet project for experimenting, not a production-hardening 
 
 - TanStack Start, React, strict TypeScript.
 - Node.js 26, direct SQLite via `node:sqlite`. The user approved replacing Prisma. Do not substitute Node LTS, Drizzle, PostgreSQL, or another stack without user agreement.
-- SQLite is authoritative for planned meals (`TODOIST_MODE=local`, user decision 2026-10-22); meals were imported from Todoist with `scripts/import-todoist.ts`. The Todoist provider stays in code but is not deployed.
+- SQLite is the only store. Each change is one transaction made while its request is handled; the Todoist provider, outbox and worker were removed (user decision 2026-11-13, schema v3). Do not reintroduce them.
 - No login: Caddy admits only the home network and tailnet. The server keeps Host and same-Origin write checks. The calendar feed under `/api/calendar/<ICS_TOKEN>.ics` is the only public path.
 - Retain self-hosted Docker Compose and Caddy deployment unless a concrete implementation requirement warrants a scoped change.
 
@@ -24,7 +24,9 @@ This is a single-user pet project for experimenting, not a production-hardening 
 - Gemini/Antigravity review is waived by the user. Do not launch or wait for Gemini reviews. Inspect your own diff and run proportionate tests and browser checks; reviewer approval is not a merge/deployment gate.
 - Use bounded tasks/timeouts and completion notifications. No endless agent polling, recursive agent spawning, history-heavy unrelated conversations, or open-ended improvement loops. Ask before escalating model effort or incurring materially greater cost beyond the agreed work.
 
-## Restart and development sequence
+## Restart and development sequence (historical: the October 2026 migration)
+
+The migration this section describes is complete; it is kept for its rules about stacked PRs and abandoned branches. Its outbox, sync and Todoist steps no longer apply (see Stack).
 
 1. Inspect live GitHub and local worktrees before cleanup. The abandoned Luna migration was a stacked set of PRs #5 through #11 and `migration/*` branches, last observed at `migration/todoist-write-client`; re-read state rather than assuming these observations remain current.
 2. Close abandoned migration PRs and remove their migration branches under the user's authorization. Preserve unrelated branches, merged work, deployment data, and the currently running app. Preserve a local git bundle or equivalent rollback record of abandoned commits before deleting refs; do not reuse rejected code as the new branch base.
@@ -36,9 +38,9 @@ This is a single-user pet project for experimenting, not a production-hardening 
 ## Verification and deployment
 
 - Run clean dependency installation, typecheck, relevant tests, production build/container checks, and real desktop/mobile browser interactions. Check actual drag and non-drag alternatives, settings save/revert, and small per-card spinner/check feedback.
-- Exercise delayed/failed Todoist responses, retries, reloads, and worker restarts. Protect stable request IDs, project ownership, and duplicate-write prevention. Successful DELETE/404 is acknowledgement; do not immediately GET after deletion and misread stale provider state.
+- Exercise failed and repeated requests (same request ID), reloads with saves in flight, and restarts. Successful DELETE of a missing meal is success; a move of a missing meal is a 404.
 - Keep `ICS_TOKEN` and any credentials out of agent logs, prompts, commits, and review output. Retain the Host/Origin mutation protections.
-- Before live cutover, take a consistent SQLite backup, retain the old deployable artifact/configuration, and use a practical data-preserving migration/restore plan. Ensure only one active Todoist mutation worker operates across the cutover. No elaborate enterprise stability programme is required.
+- Before live cutover, take a consistent SQLite backup, retain the old deployable artifact/configuration, and use a practical data-preserving migration/restore plan. No elaborate enterprise stability programme is required.
 - User has authorized the full migration, required project PR publication, merge, and deployment. Do not wait for their routine code review or ask for approval at every milestone. Escalate only genuine blockers, destructive deviations, or significant product decisions.
 - Verify remote writes with exact GitHub read-back. Verify deployment via live health/authenticated browser behavior, not build output alone. Report what actually works, review outcome, deployed revision, and any remaining limitation.
 

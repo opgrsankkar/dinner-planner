@@ -11,14 +11,9 @@ const slots: Slot[] = [
 function card(date: string, time: string, extra: Partial<Card> = {}): Card {
   return {
     id: `meal-${date}-${time}`,
-    projectId: "fake-project",
     name: "Synthetic meal",
     date,
     time,
-    requestId: "synthetic-request",
-    state: "saved",
-    error: "",
-    confirmedAt: 0,
     ...extra,
   };
 }
@@ -46,10 +41,10 @@ test("when today's later slot is occupied, Plan advances to the next day", () =>
   );
 });
 
-test("occupied slots are skipped, including pending creations and deletes", () => {
+test("occupied slots are skipped", () => {
   const cards = [
-    card("2026-10-07", "19:00", { state: "pending", id: "local:create" }),
-    card("2026-10-08", "08:00", { state: "pending", deleting: true, id: "remote:delete" }),
+    card("2026-10-07", "19:00", { id: "create" }),
+    card("2026-10-08", "08:00", { id: "delete" }),
   ];
   assert.deepEqual(
     defaultPlanPlacement("2026-10-05", slots, cards, new Date("2026-10-07T12:30:00Z")),
@@ -74,7 +69,7 @@ test("future viewed weeks suggest their earliest empty slot; past and full weeks
     defaultPlanPlacement(
       "2026-10-12",
       slots,
-      [card("2026-10-12", "08:00", { state: "pending" })],
+      [card("2026-10-12", "08:00")],
       new Date("2026-10-07T12:30:00Z"),
     ),
     { date: "2026-10-12", slotId: "lunch" },

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProp
 import { SettingsPage } from "../settings";
 import { WeekPicker } from "../WeekPicker";
 import { AddMealDialog, type CellTarget } from "../AddMealDialog";
-import type { Board, Meal, Card, Slot } from "../types";
+import type { Board as SavedBoard, Card as SavedCard, Meal, Slot } from "../types";
 import { defaultPlanPlacement } from "../plan-default";
 import { orderLibrary } from "../library-order";
 import { findMealByName, searchMeal } from "../meal-names";
@@ -34,6 +34,17 @@ type TouchDrag = {
   ghost: HTMLElement | null;
   frame: number;
 };
+// Save state lives only in the browser. A card is "pending" from the gesture
+// until its request is answered, then "saved"; confirmedAt (when that answer
+// arrived) shows its check for two seconds.
+type Card = SavedCard & {
+  requestId: string;
+  state: "pending" | "saved";
+  error: string;
+  confirmedAt: number;
+  deleting?: boolean;
+};
+type Board = Omit<SavedBoard, "cards"> & { cards: Card[] };
 type Intent = {
   requestId: string;
   mealId?: string;
@@ -511,6 +522,9 @@ export function Planner() {
   const [cellTarget, setCellTarget] = useState<CellTarget | null>(null);
   const local = useRef(new Map<string, Card>());
   const intents = useRef(new Map<string, Intent>());
+  // Card id → when its save was acknowledged, for the brief check mark.
+  const savedAt = useRef(new Map<string, number>());
+  const restored = useRef(false);
   function persistIntents() {
     sessionStorage.setItem(
       "planner-pending-http",
@@ -527,46 +541,68 @@ export function Planner() {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error);
     if (weekRef.current !== week) return;
-    const next = result as Board;
-    for (const requestId of next.receivedRequests) {
-      local.current.delete(requestId);
-      intents.current.delete(requestId);
-    }
-    persistIntents();
-    next.cards = next.cards.filter(
-      (card) =>
-        ![...local.current.values()].some((local) => local.id === card.id),
-    );
+    const saved = result as SavedBoard;
+    const at = Date.now();
+    for (const [id, time] of savedAt.current)
+      if (at - time >= 2000) savedAt.current.delete(id);
+    const next: Board = {
+      ...saved,
+      cards: saved.cards
+        .filter(
+          (card) =>
+            ![...local.current.values()].some((local) => local.id === card.id),
+        )
+        .map((card) => ({
+          ...card,
+          requestId: "",
+          state: "saved" as const,
+          error: "",
+          confirmedAt: savedAt.current.get(card.id) ?? 0,
+        })),
+    };
     next.cards.push(...local.current.values());
     setBoard(next);
     setNow(Date.now());
   }, [week]);
   useEffect(() => {
-    try {
-      const saved = JSON.parse(
-        sessionStorage.getItem("planner-pending-http") ?? "[]",
-      ) as { card: Card; intent: Intent }[];
-      for (const entry of saved) {
-        if (entry.card && entry.intent) {
-          local.current.set(entry.card.requestId, entry.card);
-          intents.current.set(entry.card.requestId, entry.intent);
+    // Saves whose answer never arrived (the page was closed or reloaded while
+    // they were in flight) are restored once and sent again with the same
+    // request ID; repeating a save is harmless.
+    if (!restored.current) {
+      restored.current = true;
+      try {
+        const saved = JSON.parse(
+          sessionStorage.getItem("planner-pending-http") ?? "[]",
+        ) as { card: Card; intent: Intent }[];
+        for (const entry of saved) {
+          if (entry.card && entry.intent) {
+            local.current.set(entry.card.requestId, entry.card);
+            intents.current.set(entry.card.requestId, entry.intent);
+          }
         }
+      } catch {
+        sessionStorage.removeItem("planner-pending-http");
       }
-    } catch {
-      sessionStorage.removeItem("planner-pending-http");
+      for (const requestId of [...intents.current.keys()]) void sendIntent(requestId);
     }
     void refresh().catch((e) => setError(String(e.message)));
   }, [refresh]);
-  // Poll quickly only while a meal is saving or showing its check; otherwise
-  // the server's Todoist cache (15s+) makes faster polling pointless.
-  const syncing = !!board?.cards.some(
-    (card) => card.state === "pending" || now - card.confirmedAt < 2000,
+  // Re-render once a check mark has been shown for its two seconds.
+  const showingCheck = !!board?.cards.some(
+    (card) => card.state === "saved" && now - card.confirmedAt < 2000,
   );
+  useEffect(() => {
+    if (!showingCheck) return;
+    const timer = setTimeout(() => setNow(Date.now()), 2000);
+    return () => clearTimeout(timer);
+  }, [showingCheck, now]);
+  // Other devices' changes show up within 15s; this device's own changes
+  // show as soon as each save is answered.
   useEffect(() => {
     const update = () => {
       if (!document.hidden) void refresh().catch((e) => setError(String(e.message)));
     };
-    const timer = setInterval(update, syncing ? 500 : 15000);
+    const timer = setInterval(update, 15000);
     const visible = () => {
       if (!document.hidden) update();
     };
@@ -577,7 +613,7 @@ export function Planner() {
       document.removeEventListener("visibilitychange", visible);
       window.removeEventListener("focus", visible);
     };
-  }, [refresh, syncing]);
+  }, [refresh]);
   // Narrow screens fit the week into the visible height: busy slot rows get
   // the height their meals need and the other rows share what is left.
   useLayoutEffect(() => {
@@ -631,14 +667,13 @@ export function Planner() {
   async function place(meal: Pick<Meal, "id" | "name">, date: string, slot: Slot) {
     const requestId = newRequestId();
     const card: Card = {
-      id: `local:${requestId}`,
+      // The request ID becomes the planned meal's id on the server.
+      id: requestId,
       requestId,
       name: meal.name,
       date,
       time: slot.time,
-      projectId: board!.projectId,
-      // Show the strikethrough immediately for an already-past meal; the server
-      // records the same intent at submission and completes it in Todoist.
+      // An already-past meal shows as eaten straight away, as it will on the server.
       completed: isPastSlot(date, slot.time) || undefined,
       state: "pending",
       error: "",
@@ -664,9 +699,28 @@ export function Planner() {
     if (!intent || !card) return;
     try {
       await post(intent.kind ? "/api/change" : "/api/plan", intent);
+      const at = Date.now();
+      if (intent.kind !== "delete") savedAt.current.set(card.id, at);
       local.current.delete(requestId);
       intents.current.delete(requestId);
       persistIntents();
+      // Show the result straight away; the refresh below only confirms it, so
+      // a failed or skipped refresh cannot leave a spinner behind.
+      setBoard(
+        (previous) =>
+          previous && {
+            ...previous,
+            cards:
+              intent.kind === "delete"
+                ? previous.cards.filter((c) => c.requestId !== requestId)
+                : previous.cards.map((c) =>
+                    c.requestId === requestId
+                      ? { ...c, requestId: "", state: "saved", error: "", confirmedAt: at, deleting: false }
+                      : c,
+                  ),
+          },
+      );
+      setNow(at);
       await refresh();
     } catch (e) {
       if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
@@ -945,24 +999,6 @@ export function Planner() {
                 </button>
               </p>
             )}
-            {board.integrationError && (
-              <p className="error-banner" role="alert">
-                {board.integrationError}. Showing last available snapshot;
-                pending actions remain queued.
-              </p>
-            )}
-            {board.cards.some((card) => card.dueError || !card.date) && (
-              <div className="error-banner" role="status">
-                Meals needing a due date or time:{" "}
-                {board.cards
-                  .filter((card) => card.dueError || !card.date)
-                  .map(
-                    (card) =>
-                      `${card.name} (${card.dueError || "No due date"})`,
-                  )
-                  .join(", ")}
-              </div>
-            )}
             {board.cards.some(
               (card) =>
                 card.date >= days[0].iso &&
@@ -1177,7 +1213,7 @@ export function Planner() {
                                       "trash-hover",
                                     );
                                   }}
-                                  key={card.requestId || card.id}
+                                  key={card.id}
                                   className={`meal-chip${card.completed ? " is-complete" : ""}${card.state === "pending" ? " is-sync-pending" : ""}${card.deleting ? " is-delete-pending" : ""}`}
                                 >
                                   <span className="meal-chip-name">
@@ -1202,14 +1238,7 @@ export function Planner() {
                                       title={card.error || "Saving meal"}
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        if (intents.current.has(card.requestId))
-                                          void sendIntent(card.requestId);
-                                        else
-                                          void post("/api/retry", {
-                                            requestId: card.requestId,
-                                          })
-                                            .then(refresh)
-                                            .catch((e) => setError(e.message));
+                                        void sendIntent(card.requestId);
                                       }}
                                     >
                                       <Icon
