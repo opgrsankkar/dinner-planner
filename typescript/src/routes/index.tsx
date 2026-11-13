@@ -699,10 +699,28 @@ export function Planner() {
     if (!intent || !card) return;
     try {
       await post(intent.kind ? "/api/change" : "/api/plan", intent);
-      if (intent.kind !== "delete") savedAt.current.set(card.id, Date.now());
+      const at = Date.now();
+      if (intent.kind !== "delete") savedAt.current.set(card.id, at);
       local.current.delete(requestId);
       intents.current.delete(requestId);
       persistIntents();
+      // Show the result straight away; the refresh below only confirms it, so
+      // a failed or skipped refresh cannot leave a spinner behind.
+      setBoard(
+        (previous) =>
+          previous && {
+            ...previous,
+            cards:
+              intent.kind === "delete"
+                ? previous.cards.filter((c) => c.requestId !== requestId)
+                : previous.cards.map((c) =>
+                    c.requestId === requestId
+                      ? { ...c, requestId: "", state: "saved", error: "", confirmedAt: at, deleting: false }
+                      : c,
+                  ),
+          },
+      );
+      setNow(at);
       await refresh();
     } catch (e) {
       if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
