@@ -1,19 +1,13 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { mealsCalendar } from "./calendar";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { Slot } from "../types";
-import { Store, Worker } from "./store";
-import { FakeTodoist } from "./todoist";
-import { TodoistApi } from "./todoist-api";
-import { LocalPlan } from "./local-plan";
+import { Store } from "./store";
 import { RecipeInputError } from "../recipe";
 import { kolkataIso, prepRange, RequestError } from "./recipes";
-import type { Todoist } from "./todoist";
 export type App = {
   store: Store;
-  todoist: Todoist;
-  worker: Worker;
   origin: string;
   // Secret path segment for the read-only calendar feed; empty disables it.
   calendarToken: string;
@@ -30,44 +24,10 @@ export function app(): Promise<App> {
     );
     mkdirSync(dirname(path), { recursive: true });
     const store = new Store(path);
-    await store.seed(process.env.TODOIST_MODE === "fake");
-    let todoist: Todoist;
-    if (process.env.TODOIST_MODE === "fake") {
-      const fake = new FakeTodoist(
-        resolve(process.env.FAKE_TODOIST_DB ?? ".local/fake-todoist.sqlite"),
-      );
-      fake.delayMs = Number(process.env.FAKE_TODOIST_DELAY_MS ?? 1200);
-      fake.moveFailBefore = Number(
-        process.env.FAKE_TODOIST_MOVE_FAIL_BEFORE ?? 0,
-      );
-      fake.deleteFailBefore = Number(
-        process.env.FAKE_TODOIST_DELETE_FAIL_BEFORE ?? 0,
-      );
-      fake.failBefore = Number(process.env.FAKE_TODOIST_FAIL_BEFORE ?? 0);
-      fake.loseResponse = Number(process.env.FAKE_TODOIST_LOSE_RESPONSE ?? 0);
-      todoist = fake;
-    } else if (process.env.TODOIST_MODE === "local") {
-      todoist = new LocalPlan(store);
-    } else {
-      if (process.env.TODOIST_MODE && process.env.TODOIST_MODE !== "live")
-        throw new Error("Invalid TODOIST_MODE");
-      const token =
-        process.env.TODOIST_TOKEN?.trim() ||
-        (process.env.TODOIST_TOKEN_FILE
-          ? readFileSync(process.env.TODOIST_TOKEN_FILE, "utf8").trim()
-          : "");
-      if (!token)
-        throw new Error(
-          "Configure TODOIST_TOKEN_FILE or TODOIST_TOKEN; standalone storage requires TODOIST_MODE=local, demo requires TODOIST_MODE=fake",
-        );
-      todoist = new TodoistApi(token);
-    }
-    const worker = new Worker(store, todoist);
-    worker.start();
+    // PLANNER_DEMO=1 seeds a few sample meals into an empty database.
+    await store.seed(process.env.PLANNER_DEMO === "1");
     return {
       store,
-      todoist,
-      worker,
       origin: process.env.PLANNER_ORIGIN ?? "http://localhost:8789",
       calendarToken: process.env.ICS_TOKEN?.trim() ?? "",
     };
@@ -95,7 +55,7 @@ export async function handle(
   request: Request,
   current: App,
 ): Promise<Response> {
-  const { store, todoist, origin } = current;
+  const { store, origin } = current;
   const url = new URL(request.url);
   const allowed = new URL(origin);
   const localAlias =
@@ -121,7 +81,7 @@ export async function handle(
   if (request.method === "GET" && feed) {
     if (!current.calendarToken || !sameSecret(feed[1], current.calendarToken))
       return json({ error: "Unknown endpoint" }, 404);
-    const board = await store.board(todoist);
+    const board = await store.board();
     return new Response(mealsCalendar(board.cards, board.slots, new Date()), {
       headers: {
         "Content-Type": "text/calendar; charset=utf-8",
@@ -177,7 +137,6 @@ export async function handle(
         from: kolkataIso(range.from),
         to: kolkataIso(range.to),
         reminders: await store.prep(
-          todoist,
           range.from,
           range.to,
           url.searchParams.get("overdue") === "1",
@@ -193,7 +152,7 @@ export async function handle(
       )
         throw new Error("Invalid week");
       return json({
-        ...(await store.board(todoist, week)),
+        ...(await store.board(week)),
         calendarUrl: current.calendarToken
           ? `${origin}/api/calendar/${current.calendarToken}.ics`
           : "",
@@ -203,7 +162,6 @@ export async function handle(
       request.method === "POST" &&
       [
         "/api/change",
-        "/api/retry",
         "/api/settings/slots",
         "/api/settings/theme",
         "/api/library/remove",
@@ -224,20 +182,14 @@ export async function handle(
         const kind = string("kind");
         if (kind !== "move" && kind !== "delete")
           throw new Error("Invalid action");
-        await store.change(
-          {
-            requestId: string("requestId"),
-            taskId: string("taskId"),
-            kind,
-            ...(kind === "move"
-              ? { slotId: string("slotId"), date: string("date") }
-              : {}),
-          },
-          todoist,
-        );
-      } else if (url.pathname === "/api/retry")
-        await store.retry(string("requestId"), todoist);
-      else if (url.pathname === "/api/settings/theme") {
+        await store.change({
+          taskId: string("taskId"),
+          kind,
+          ...(kind === "move"
+            ? { slotId: string("slotId"), date: string("date") }
+            : {}),
+        });
+      } else if (url.pathname === "/api/settings/theme") {
         const theme = string("theme");
         if (theme !== "system" && theme !== "light" && theme !== "dark")
           throw new Error("Invalid theme");
@@ -275,7 +227,7 @@ export async function handle(
             throw new Error("Invalid slot");
           return { id: value.id, name: value.name, time: value.time };
         });
-        await store.saveSlots(slots, fields.revision, todoist);
+        await store.saveSlots(slots, fields.revision);
       }
       return json({ ok: true }, 202);
     }
@@ -297,19 +249,15 @@ export async function handle(
         )
       )
         return json({ error: "Invalid placement" }, 400);
-      const project = await todoist.mealsProject();
-      if (project.name !== "Meals")
-        return json({ error: "Meals project unavailable" }, 409);
-      const row = await store.place(
+      await store.place(
         body as {
           requestId: string;
           mealId: string;
           slotId: string;
           date: string;
         },
-        project.id,
       );
-      return json({ requestId: row.id, state: row.state }, 202);
+      return json({ ok: true });
     }
     return json({ error: "Unknown endpoint" }, 404);
   } catch (error) {

@@ -8,7 +8,6 @@ import { chromium, type Locator } from '@playwright/test';
 const directory = await mkdtemp(join(tmpdir(), 'planner-drag-'));
 const origin = 'http://127.0.0.1:3196';
 const server = spawn(process.execPath, ['scripts/serve.mjs'], { env: { ...process.env,
-  TODOIST_MODE: 'local', TODOIST_TOKEN: '', TODOIST_TOKEN_FILE: '',
   DATABASE_PATH: join(directory, 'planner.sqlite'), PLANNER_ORIGIN: origin,
   ALLOWED_HOSTS: '127.0.0.1', HOST: '127.0.0.1', PORT: '3196',
 }, stdio: 'inherit' });

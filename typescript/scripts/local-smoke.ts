@@ -9,11 +9,9 @@ import type { Board } from "../src/types";
 const directory = await mkdtemp(join(tmpdir(), "planner-local-runtime-"));
 const origin = "http://127.0.0.1:3197";
 const env = {
-  ...process.env, TODOIST_MODE: "local",
+  ...process.env,
   DATABASE_PATH: join(directory, "planner.sqlite"), PLANNER_ORIGIN: origin,
-  HOST: "127.0.0.1", PORT: "3197",   ALLOWED_HOSTS: "127.0.0.1", TODOIST_TOKEN: "",
-  // Proves local mode does not read a token even when a file is configured.
-  TODOIST_TOKEN_FILE: join(directory, "nonexistent-token"),
+  HOST: "127.0.0.1", PORT: "3197", ALLOWED_HOSTS: "127.0.0.1",
 };
 let server: ReturnType<typeof spawn> | undefined;
 let output = "";
@@ -55,24 +53,16 @@ const day = (offset: number) => {
 };
 const week = day(0);
 async function board(): Promise<Board> { return (await request(`/api/board?week=${week}`)).json(); }
-async function saved(requestId: string) {
-  for (let attempt = 0; attempt < 50; attempt++) {
-    const current = await board();
-    if (current.receivedRequests.includes(requestId) && current.cards.length &&
-        current.cards.every(card => card.state === "saved")) return current;
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
-  throw new Error("Local write did not complete");
-}
 try {
   await start();
   const initial = await board();
-  assert.equal(initial.integrationError, "");
   assert.equal(initial.library.length, 0);
   const meal = await (await request("/api/library", { name: "Standalone dinner" })).json();
   const placement = { requestId: randomUUID(), mealId: meal.id, slotId: initial.slots[0].id, date: week };
   await request("/api/plan", placement);
-  const placed = await saved(placement.requestId);
+  // Saved once the response arrives; repeating the request plans nothing new.
+  const placed = await board();
+  assert.deepEqual(placed.cards.map(card => card.id), [placement.requestId]);
   await request("/api/plan", placement);
   assert.equal((await board()).cards.length, 1);
   await stop();
@@ -82,19 +72,16 @@ try {
   assert.equal(restored.library[0].id, meal.id);
   const move = { requestId: randomUUID(), taskId: restored.cards[0].id, kind: "move", slotId: initial.slots[1].id, date: day(1) };
   await request("/api/change", move);
-  assert.equal((await saved(move.requestId)).cards[0].date, move.date);
+  assert.equal((await board()).cards[0].date, move.date);
   const deletion = { requestId: randomUUID(), taskId: restored.cards[0].id, kind: "delete" };
   await request("/api/change", deletion);
-  let deleted = false;
-  for (let attempt = 0; attempt < 50; attempt++) {
-    if (!(await board()).cards.length) { deleted = true; break; }
-    await new Promise(resolve => setTimeout(resolve, 100));
-  }
-  assert.ok(deleted);
+  assert.equal((await board()).cards.length, 0);
+  // Deleting a meal that is already gone succeeds.
+  await request("/api/change", deletion);
   await stop();
   await start();
   assert.equal((await board()).cards.length, 0);
-  console.log("Local production smoke passed: token-free startup, create/move/delete, replay and restart persistence.");
+  console.log("Local production smoke passed: startup, create/move/delete, replay and restart persistence.");
 } finally {
   await stop();
   await rm(directory, { recursive: true, force: true });

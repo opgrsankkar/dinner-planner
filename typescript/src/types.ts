@@ -2,36 +2,17 @@
 // `variantCount` is how many recipe variants the meal has (0 without a recipe).
 export type Meal = { id: string; name: string; aliases: string[]; hasRecipe?: boolean; variantCount?: number };
 export type Slot = { id: string; name: string; time: string };
-export type Placement = {
-  mealId: string;
-  name: string;
-  date: string;
-  slotId: string;
-  time: string;
-  projectId: string;
-  // Persisted intent, decided at submission: create the meal then mark it
-  // complete because its date+slot time had already passed.
-  complete?: boolean;
-};
-export type RemoteMeal = {
+// A planned meal as the board returns it. `completed` follows the clock: a
+// meal counts as eaten once its date and slot time have passed.
+export type Card = {
   id: string;
-  projectId: string;
   name: string;
   date: string;
   time: string;
-  requestId: string;
   completed?: boolean;
-  description?: string;
-  dueError?: string;
-  // Library meal the card was planned from (local mode, newer cards only).
-  // Use Card.libraryMealId, which falls back to the name, rather than this.
+  // Library meal the card was planned from (newer cards only). Use
+  // libraryMealId, which falls back to the name, rather than this.
   mealId?: string;
-};
-export type Card = RemoteMeal & {
-  state: "pending" | "saved";
-  error: string;
-  confirmedAt: number;
-  deleting?: boolean;
   slotId?: string;
   // The library meal this card resolves to (see resolveCardMeal), or null.
   libraryMealId?: string | null;
@@ -45,9 +26,6 @@ export type Board = {
   // Subscription URL for the read-only meals calendar; empty when disabled.
   calendarUrl?: string;
   settings: Settings;
-  receivedRequests: string[];
-  projectId: string;
-  integrationError?: string;
 };
 
 export type Settings = {
@@ -56,8 +34,4 @@ export type Settings = {
   libraryOrder: string[];
   aliases: Record<string, string>;
   revision: number;
-};
-export type Mutation = Placement & {
-  kind?: "move" | "delete";
-  taskId?: string;
 };

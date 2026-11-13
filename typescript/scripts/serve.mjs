@@ -10,17 +10,6 @@ const db = resolve(
     process.env.PLANNER_DB ??
     ".local/planner.sqlite",
 );
-if (process.env.TODOIST_MODE && !["live", "fake", "local"].includes(process.env.TODOIST_MODE))
-  throw new Error("Invalid TODOIST_MODE");
-if (
-  process.env.TODOIST_MODE !== "fake" &&
-  process.env.TODOIST_MODE !== "local" &&
-  !process.env.TODOIST_TOKEN &&
-  !process.env.TODOIST_TOKEN_FILE
-)
-  throw new Error(
-    "Todoist credentials are required; standalone storage requires TODOIST_MODE=local, demo requires TODOIST_MODE=fake",
-  );
 // Node 26 strips this shared TypeScript module natively; no CLI/runtime dependency.
 // Validate storage before listening, including before reporting /healthz ready.
 await mkdir(dirname(db), { recursive: true });

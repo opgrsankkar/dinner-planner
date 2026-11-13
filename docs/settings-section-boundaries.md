@@ -17,7 +17,7 @@ Paths below are relative to `typescript/`.
 
 | Writer | Files |
 | --- | --- |
-| Navigation | `src/settings.tsx`, `src/routes/settings.tsx`, `public/static/app.css`, `scripts/smoke.ts` |
+| Navigation | `src/settings.tsx`, `src/routes/settings.tsx`, `public/static/app.css`, `scripts/drag-smoke.ts` |
 | Library | `src/settings/MealLibrarySettings.tsx`; new `src/settings/MealLibrarySettings.css` if needed (import it in the section); new `scripts/library-settings-smoke.ts` for browser checks or `tests/library-settings.test.ts` for non-browser tests |
 | Reserved / unchanged | `src/settings/AppearanceSettings.tsx`, `src/settings/MealSlotSettings.tsx`, planner components, shared mutation/server modules, `package.json`, existing backend tests |
 

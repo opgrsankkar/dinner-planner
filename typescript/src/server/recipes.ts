@@ -103,7 +103,6 @@ export function prepReminders(
 ): PrepReminder[] {
   const reminders: (PrepReminder & { at: number; mealMs: number })[] = [];
   for (const card of cards) {
-    if (card.deleting) continue;
     const meal = resolveCardMeal(card, library);
     const recipe = meal && recipes.get(meal.id);
     if (!meal || !recipe?.prep.length) continue;

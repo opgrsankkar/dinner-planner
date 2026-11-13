@@ -5,8 +5,7 @@ import type { Card, Slot } from "../src/types";
 
 const slots: Slot[] = [{ id: "s1", name: "Dinner", time: "19:00" }];
 const card = (overrides: Partial<Card>): Card => ({
-  id: "m1", projectId: "local-meals", name: "Idli, sambar; chutney", date: "2026-10-22", time: "19:00",
-  requestId: "r1", state: "saved", error: "", confirmedAt: 1, slotId: "s1", ...overrides,
+  id: "m1", name: "Idli, sambar; chutney", date: "2026-10-22", time: "19:00", slotId: "s1", ...overrides,
 });
 
 test("calendar converts IST slots to UTC events and escapes text", () => {
@@ -18,11 +17,9 @@ test("calendar converts IST slots to UTC events and escapes text", () => {
   assert.match(text, /UID:m1@meals\.x1c/);
 });
 
-test("calendar skips pending, deleting, undated and out-of-window meals", () => {
+test("calendar skips untimed and out-of-window meals", () => {
   const now = new Date("2026-10-22T06:00:00Z");
   const text = mealsCalendar([
-    card({ id: "pending", state: "pending" }),
-    card({ id: "deleting", deleting: true }),
     card({ id: "undated", time: "" }),
     card({ id: "old", date: "2026-09-01" }),
     card({ id: "far", date: "2027-06-01" }),

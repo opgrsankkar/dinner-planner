@@ -11,17 +11,13 @@
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
     "db:init": "node --import tsx scripts/init-db.ts",
-    "smoke": "tsx scripts/smoke.ts",
     "smoke:drag": "tsx scripts/drag-smoke.ts",
     "smoke:local": "tsx scripts/local-smoke.ts",
-    "check:runtime": "node --import tsx scripts/runtime-check.ts",
-    "demo": "mkdir -p .local && npm run db:init && npm run dev",
+    "demo": "mkdir -p .local && npm run db:init && PLANNER_DEMO=1 npm run dev",
     "start": "node scripts/serve.mjs",
-    "import:legacy": "tsx scripts/import-legacy.ts",
     "record:slots": "tsx scripts/slot-videos.ts",
     "icons": "tsx scripts/render-icons.ts",
-    "smoke:pwa": "tsx scripts/pwa-smoke.ts",
-    "import:todoist": "node --import tsx scripts/import-todoist.ts"
+    "smoke:pwa": "tsx scripts/pwa-smoke.ts"
   },
   "dependencies": {
     "@tanstack/react-router": "1.170.46",

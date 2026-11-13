@@ -6,8 +6,7 @@ import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import { Store, Worker } from "../src/server/store";
-import { LocalPlan } from "../src/server/local-plan";
+import { Store } from "../src/server/store";
 import { Persistence, type RecipeRow } from "../src/server/persistence";
 import { handle, type App } from "../src/server/app";
 import { formatHoursBefore, formatMinutes, parseRecipe, RecipeInputError, type Recipe, type VariantSummary } from "../src/recipe";
@@ -122,7 +121,7 @@ const slots: Slot[] = [
 ];
 function card(id: string, name: string, date: string, time: string, extra: Partial<Card> = {}): Card {
   const slot = slots.find((entry) => entry.time === time);
-  return { id, projectId: "local-meals", name, date, time, requestId: id, state: "saved", error: "", confirmedAt: 0, slotId: slot?.id, ...extra };
+  return { id, name, date, time, slotId: slot?.id, ...extra };
 }
 const at = (value: string) => Date.parse(value);
 
@@ -147,14 +146,13 @@ test("prep reminders fall back across midnight onto the previous day in Asia/Kol
   assert.equal(new Date(at("2026-11-11T23:30:00+05:30")).toISOString(), "2026-11-11T18:00:00.000Z");
 });
 
-test("prep reminders honour the [from, to) window and skip deleted, unmatched or undated cards", () => {
+test("prep reminders honour the [from, to) window and skip unmatched or undated cards", () => {
   const recipes = new Map<string, Recipe>([["a", dosa], ["c", { ...dosa, prep: [{ text: "Set curd", hoursBefore: 6 }] }]]);
   const cards = [
     card("k1", "தோசை", "2026-11-12", "08:00"),
-    card("k2", "Dosa", "2026-11-12", "19:30", { deleting: true }),
     card("k3", "Pongal", "2026-11-12", "08:00"),
     card("k4", "Curd rice", "2026-11-11", "19:30"),
-    card("k5", "Curd rice", "", "", { dueError: "No due date" }),
+    card("k5", "Curd rice", "", ""),
     card("k6", "Masala dosa", "2026-11-11", "19:30"),
   ];
   const from = at("2026-11-11T12:00:00+05:30");
@@ -222,8 +220,9 @@ test("the recipe table is added to a database that predates recipes", () => {
   old.exec(preRecipesSchema);
   old.prepare("INSERT INTO library VALUES (?, ?)").run(mealId, "இட்லி");
   old.prepare("INSERT INTO library_alias VALUES (?, ?, 0)").run(mealId, "Idli");
-  old.prepare("INSERT INTO local_meal VALUES (?, ?)").run(randomUUID(), JSON.stringify({ name: "Idli" }));
-  const tables = ["library", "library_alias", "local_meal"];
+  const planned = randomUUID();
+  old.prepare("INSERT INTO local_meal VALUES (?, ?)").run(planned, JSON.stringify({ name: "Idli" }));
+  const tables = ["library", "library_alias"];
   const before = tables.map((table) => old.prepare(`SELECT * FROM ${table}`).all());
   old.close();
 
@@ -236,8 +235,10 @@ test("the recipe table is added to a database that predates recipes", () => {
   new Persistence(path).close();
   const check = new DatabaseSync(path);
   assert.deepEqual(tables.map((table) => check.prepare(`SELECT * FROM ${table}`).all()), before);
-  assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 2);
+  assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 3);
   assert.equal(check.prepare("SELECT count(*) AS n FROM recipe").get()!.n, 1);
+  // Its planned meal moved into planned_meal (schema v3) with the same id.
+  assert.equal(check.prepare("SELECT name FROM planned_meal WHERE id = ?").get(planned)!.name, "Idli");
   check.close();
 });
 
@@ -271,7 +272,7 @@ test("the one-recipe-per-meal table becomes default variants in place, once", ()
   assert.equal(again.recipeVariants(idli).length, 2);
   again.close();
   const check = new DatabaseSync(path);
-  assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 2);
+  assert.equal(check.prepare("PRAGMA user_version").get()!.user_version, 3);
   assert.deepEqual(check.prepare("SELECT * FROM library").all(), before);
   assert.equal(check.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name = 'recipe_v1'").get()!.n, 0);
   // Removing a meal still removes all of its variants.
@@ -286,9 +287,7 @@ async function fixture() {
   await cp(join(root, "template.sqlite"), path);
   const store = new Store(path);
   await store.seed(false);
-  const provider = new LocalPlan(store);
-  const worker = new Worker(store, provider);
-  const app: App = { store, todoist: provider, worker, origin: "http://localhost:3000", calendarToken: "secret-calendar-token-123456" };
+  const app: App = { store, origin: "http://localhost:3000", calendarToken: "secret-calendar-token-123456" };
   const call = async (path: string, method = "GET", body?: unknown, headers: Record<string, string> = {}) => {
     const response = await handle(new Request(app.origin + path, {
       method,
@@ -299,11 +298,10 @@ async function fixture() {
     return { status: response.status, text, json: JSON.parse(text) };
   };
   const plan = async (mealId: string, date: string, slotIndex = 0) => {
-    const board = await store.board(provider);
-    await store.place({ requestId: randomUUID(), mealId, slotId: board.slots[slotIndex].id, date }, board.projectId);
-    await worker.tick();
+    const board = await store.board();
+    await store.place({ requestId: randomUUID(), mealId, slotId: board.slots[slotIndex].id, date });
   };
-  return { store, provider, worker, app, call, plan, close: async () => { await worker.stop(); await store.close(); } };
+  return { store, app, call, plan, close: async () => { await store.close(); } };
 }
 
 test("recipe API: save, read, board indicators, rename and removal", async () => {
@@ -314,9 +312,9 @@ test("recipe API: save, read, board indicators, rename and removal", async () =>
     const other = await f.store.addLibrary("Pongal");
     await f.plan(meal.id, "2030-10-02");
     // A card planned under a different, alias name (e.g. imported from Todoist).
-    const board0 = await f.store.board(f.provider);
+    const board0 = await f.store.board();
     const breakfast = board0.slots.find((slot) => slot.time === "08:00")!;
-    f.store.db.localMealInsert({ id: randomUUID(), body: JSON.stringify({ id: "x", projectId: "local-meals", name: "dosa", date: "2030-10-03", time: breakfast.time, requestId: randomUUID() }) });
+    f.store.db.plannedInsert({ id: randomUUID(), mealId: null, name: "dosa", date: "2030-10-03", time: breakfast.time });
 
     assert.equal((await f.call(`/api/recipes/${meal.id}`)).status, 404);
     const saved = await f.call(`/api/recipes/${meal.id}`, "PUT", dosa);
@@ -344,7 +342,7 @@ test("recipe API: save, read, board indicators, rename and removal", async () =>
     // Renaming keeps the recipe. The card planned from the library keeps its
     // meal by id; the alias-named card still matches the kept alias.
     await f.store.renameLibrary(meal.id, "Ghee roast dosa", ["Dosa"]);
-    const renamed = await f.store.board(f.provider);
+    const renamed = await f.store.board();
     assert.ok(renamed.cards.every((item) => item.libraryMealId === meal.id && item.hasRecipe));
     assert.equal((await f.call(`/api/recipes/${meal.id}`)).json.meal.name, "Ghee roast dosa");
 
@@ -352,7 +350,7 @@ test("recipe API: save, read, board indicators, rename and removal", async () =>
     const removed = await f.call("/api/library/remove", "POST", { mealId: meal.id });
     assert.equal(removed.status, 202);
     assert.equal(f.store.db.recipeCounts().size, 0);
-    const after = await f.store.board(f.provider);
+    const after = await f.store.board();
     assert.equal(after.cards.length, 2);
     assert.ok(after.cards.every((item) => item.libraryMealId === null && item.hasRecipe === false));
     assert.equal((await f.call(`/api/recipes/${meal.id}`)).json.error, "Meal not found");
@@ -410,7 +408,7 @@ test("prep API lists reminders for planned meals without the calendar link", asy
   try {
     const created = await f.call("/api/recipes", "POST", { name: "தோசை", recipe: dosa });
     const pongal = await f.store.addLibrary("Pongal");
-    const board = await f.store.board(f.provider);
+    const board = await f.store.board();
     const breakfast = board.slots.findIndex((slot) => slot.time === "08:00");
     await f.plan(created.json.meal.id, "2030-10-02", breakfast);
     await f.plan(pongal.id, "2030-10-02", breakfast);
@@ -422,9 +420,9 @@ test("prep API lists reminders for planned meals without the calendar link", asy
       ["2030-10-01T12:00:00+05:30", "Soak rice and urad dal", "தோசை", "Breakfast"],
       ["2030-10-01T20:00:00+05:30", "Grind and ferment the batter", "தோசை", "Breakfast"],
     ]);
-    // A meal being deleted no longer needs prep.
-    const card = (await f.store.board(f.provider)).cards.find((item) => item.name === "தோசை")!;
-    await f.store.change({ requestId: randomUUID(), taskId: card.id, kind: "delete" }, f.provider);
+    // A deleted meal no longer needs prep.
+    const card = (await f.store.board()).cards.find((item) => item.name === "தோசை")!;
+    await f.store.change({ taskId: card.id, kind: "delete" });
     assert.deepEqual((await f.call("/api/prep?from=2030-10-01T00:00&to=2030-10-02T00:00")).json.reminders, []);
     assert.equal((await f.call("/api/prep?from=yesterday")).status, 400);
     assert.equal((await f.call("/api/prep")).status, 200);
@@ -513,7 +511,7 @@ test("recipe variants: add, read, labels, default, rename and delete", async () 
 
     // Board cards and library entries carry the count.
     await f.plan(meal.id, "2030-10-02");
-    const board = await f.store.board(f.provider);
+    const board = await f.store.board();
     assert.deepEqual(board.cards.map((card) => [card.hasRecipe, card.variantCount]), [[true, 4]]);
     assert.deepEqual(board.library.find((entry) => entry.id === meal.id)?.variantCount, 4);
     assert.deepEqual((await f.call("/api/recipes?name=tomato sambar")).json.meals[0].variantCount, 4);
@@ -533,7 +531,7 @@ test("recipe variants: add, read, labels, default, rename and delete", async () 
     assert.equal((await f.call(`/api/recipes/${meal.id}/variants/${lone.id}`, "PATCH", { label: "" })).json.variant.label, "");
     assert.deepEqual((await f.call(`/api/recipes/${meal.id}/variants/${lone.id}`, "DELETE")).json, { deleted: true, variants: [] });
     assert.equal((await f.call(`/api/recipes/${meal.id}`)).json.error, "This meal has no recipe");
-    assert.equal((await f.store.board(f.provider)).cards[0]!.hasRecipe, false);
+    assert.equal((await f.store.board()).cards[0]!.hasRecipe, false);
     assert.equal(f.store.db.libraryAll().length, 2, "deleting variants keeps the meal");
 
     // ?all=1 on DELETE removes every variant.
@@ -579,7 +577,7 @@ test("prep reminders come from the default variant only", async () => {
     const meal = await f.store.addLibrary("தோசை");
     const plain = (await f.call(`/api/recipes/${meal.id}`, "PUT", { ...dosa, prep: [] })).json.variant.id as string;
     const soaked = await f.call(`/api/recipes/${meal.id}/variants`, "POST", { label: "Soaked", existingLabel: "Instant", recipe: dosa });
-    const board = await f.store.board(f.provider);
+    const board = await f.store.board();
     await f.plan(meal.id, "2030-10-02", board.slots.findIndex((slot) => slot.time === "08:00"));
     const window = `/api/prep?from=${encodeURIComponent("2030-10-01T00:00")}&to=${encodeURIComponent("2030-10-02T00:00")}`;
     assert.deepEqual((await f.call(window)).json.reminders, [], "the non-default variant's prep is not reminded");
