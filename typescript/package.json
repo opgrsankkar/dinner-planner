@@ -13,6 +13,7 @@
     "db:init": "node --import tsx scripts/init-db.ts",
     "smoke:drag": "tsx scripts/drag-smoke.ts",
     "smoke:local": "tsx scripts/local-smoke.ts",
+    "smoke:servings": "tsx scripts/servings-smoke.ts",
     "demo": "mkdir -p .local && npm run db:init && PLANNER_DEMO=1 npm run dev",
     "start": "node scripts/serve.mjs",
     "record:slots": "tsx scripts/slot-videos.ts",

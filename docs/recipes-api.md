@@ -68,6 +68,12 @@ Validation failures return `400`:
 }
 ```
 
+## Display-only servings adjustment
+
+The web recipe viewer and its cook-mode ingredient list open at **2 servings**, with a 1–99 stepper. A target is local to each variant for that opening and resets on reload. It never writes a recipe or changes the API response. Scaling always starts from the saved ingredient `amount`, using `target / Number(servings)` only when `servings` is an unambiguous positive numeric string. Empty or free-text yields (for example `3 large rolls`) disable adjustment and show “quantities unchanged”; never infer servings from `totalMinutes`.
+
+Only the leading quantity in `amount` is scaled (decimals, fractions including Unicode/mixed fractions, and ranges). Units and trailing notes stay literal, as do `item`, steps, notes, prep and all times. Unknown amounts such as `to taste` and ambiguous pack multipliers such as `2 x 400g` stay unchanged. Common exact fractions are displayed as fractions; other results use four significant digits. Counted ingredients can be fractional. The shared pure implementation is `typescript/src/recipes/servings.ts`. Other clients must apply the same display-only policy themselves; server data remains the source recipe.
+
 ## How a planned meal finds its recipe
 
 Planned cards store the meal name they were planned with, not a library id. The server resolves each card to a library meal with one rule (`resolveCardMeal` in `typescript/src/server/recipes.ts`), used by the board and by prep reminders:
