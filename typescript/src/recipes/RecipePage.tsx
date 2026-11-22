@@ -4,6 +4,8 @@ import { formatHoursBefore, formatMinutes, type StoredRecipe, type VariantSummar
 import { RecipeIcon } from "./RecipeIcon";
 import { recipeRequest, RecipeApiError, type RecipeResponse } from "./recipe-draft";
 import { AddVariantForm, canAddVariant, variantFromUrl, variantHref, VariantTabs } from "./RecipeVariants";
+import { scaleAmount, sourceServings } from "./servings";
+import { ServingsControl } from "./ServingsControl";
 import "./recipes.css";
 
 type Load =
@@ -29,6 +31,7 @@ export function RecipePage({ mealId, library }: { mealId: string; library: Meal[
   const [load, setLoad] = useState<Load>({ status: "loading" });
   const [selectedId, setSelectedId] = useState<string | undefined>(variantFromUrl);
   const [ticks, setTicks] = useState<ReadonlyMap<string, ReadonlySet<number>>>(new Map());
+  const [targets, setTargets] = useState<ReadonlyMap<string, number>>(new Map());
   const [cooking, setCooking] = useState(false);
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -103,9 +106,13 @@ export function RecipePage({ mealId, library }: { mealId: string; library: Meal[
   const { meal } = load;
   const variant = selected!;
   const recipe = variant.recipe;
+  const target = targets.get(variant.id) ?? 2;
+  const setTarget = (value: number) => setTargets(current => new Map(current).set(variant.id, value));
+  const displayedRecipe = { ...recipe, ingredients: recipe.ingredients.map(ingredient => ({
+    ...ingredient, amount: scaleAmount(ingredient.amount, sourceServings(recipe.servings), target),
+  })) };
   const several = variants.length > 1;
   const facts = [
-    recipe.servings && `Serves ${recipe.servings}`,
     recipe.totalMinutes && formatMinutes(recipe.totalMinutes),
   ].filter(Boolean);
   return (
@@ -145,6 +152,8 @@ export function RecipePage({ mealId, library }: { mealId: string; library: Meal[
       {feedback && <p className="recipe-issue" role="alert">{feedback}</p>}
       {adding && <AddVariantForm mealId={mealId} current={variant} variants={variants} onCancel={() => setAdding(false)} />}
 
+      <ServingsControl source={recipe.servings} target={target} onChange={setTarget} />
+
       {recipe.prep.length > 0 && (
         <section className="recipe-section" aria-labelledby="recipe-ahead">
           <h2 id="recipe-ahead">Ahead of time</h2>
@@ -164,7 +173,7 @@ export function RecipePage({ mealId, library }: { mealId: string; library: Meal[
               <button type="button" className="text-link-button" onClick={() => setTicked(new Set<number>())}>Clear ticks</button>
             )}
           </div>
-          <IngredientChecklist recipe={recipe} ticked={ticked} toggle={toggle} />
+          <IngredientChecklist recipe={displayedRecipe} ticked={ticked} toggle={toggle} />
         </section>
       )}
 
@@ -194,7 +203,7 @@ export function RecipePage({ mealId, library }: { mealId: string; library: Meal[
         </section>
       )}
       {cooking && (
-        <CookMode name={several ? `${meal.name} · ${variant.label}` : meal.name} variant={several ? variant.label : ""} recipe={recipe} ticked={ticked} toggle={toggle} onClose={() => setCooking(false)} />
+        <CookMode name={several ? `${meal.name} · ${variant.label}` : meal.name} variant={several ? variant.label : ""} recipe={displayedRecipe} target={target} setTarget={setTarget} ticked={ticked} toggle={toggle} onClose={() => setCooking(false)} />
       )}
     </main>
   );
@@ -235,8 +244,10 @@ function clock(ms: number) {
 
 // One step at a time in large text. Tapping the step advances; timers keep
 // running across steps; the screen stays awake (Wake Lock API) while open.
-function CookMode({ name, variant, recipe, ticked, toggle, onClose }: {
+function CookMode({ name, variant, recipe, target, setTarget, ticked, toggle, onClose }: {
   name: string;
+  target: number;
+  setTarget: (target: number) => void;
   // The variant being cooked, shown beside the step count ("" for a single recipe).
   variant: string;
   recipe: StoredRecipe;
@@ -380,6 +391,7 @@ function CookMode({ name, variant, recipe, ticked, toggle, onClose }: {
       )}
       {showIngredients ? (
         <div className="cook-ingredients">
+          <ServingsControl source={recipe.servings} target={target} onChange={setTarget} />
           <IngredientChecklist recipe={recipe} ticked={ticked} toggle={toggle} />
         </div>
       ) : (
