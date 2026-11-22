@@ -180,6 +180,9 @@ export function RecipePage({ mealId, library }: { mealId: string; library: Meal[
       {recipe.steps.length > 0 && (
         <section className="recipe-section" aria-labelledby="recipe-steps">
           <h2 id="recipe-steps">Steps</h2>
+          {sourceServings(recipe.servings) !== null && sourceServings(recipe.servings) !== target && (
+            <p className="recipe-servings-unavailable">Use scaled ingredient amounts above; steps keep source quantities.</p>
+          )}
           <ol className="recipe-step-list">
             {recipe.steps.map((step, index) => (
               <li key={index}>
@@ -388,6 +391,9 @@ function CookMode({ name, variant, recipe, target, setTarget, ticked, toggle, on
             );
           })}
         </div>
+      )}
+      {sourceServings(recipe.servings) !== null && sourceServings(recipe.servings) !== target && (
+        <p className="recipe-servings-unavailable">Use scaled ingredient amounts; steps keep source quantities.</p>
       )}
       {showIngredients ? (
         <div className="cook-ingredients">
