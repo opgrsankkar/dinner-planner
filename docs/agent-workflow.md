@@ -47,6 +47,6 @@ The migration this section describes is complete; it is kept for its rules about
 ## Publishing and deploying
 
 1. Push the branch and open the PR as the repository owner's GitHub account (`opgrsankkar`); other logged-in `gh` accounts may lack push access. Merge once your own checks pass (no CI is configured).
-2. The live checkout is `/srv/apps/homelab/compose/dinner-planner` (also reachable as `/srv/homelab/compose/dinner-planner`), kept at a detached HEAD. Note the current SHA for rollback, then `git fetch origin master` and `git checkout --detach <merged SHA>` there.
+2. The live checkout is `/srv/homelab/compose/dinner-planner`, kept at a detached HEAD; develop in `~/Projects/dinner-planner`, never in the live checkout. Use the `/srv/homelab` spelling: the `/srv/apps/homelab` bind-mount alias fails Git's ownership check. Note the current SHA for rollback, then `git fetch origin master` and `git checkout --detach <merged SHA>` there.
 3. In that directory run `sudo docker compose up -d --build`. Do not read or edit `.env`, `secrets/`, or `data/`.
 4. Confirm `sudo docker inspect -f '{{.State.Health.Status}}' dinner-planner` reports `healthy`, `https://meals.happydaysblr.ddns.net/healthz` returns 200, and the live assets contain the change. Roll back by checking out the previous SHA and rebuilding.
